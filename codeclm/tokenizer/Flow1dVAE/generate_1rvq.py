@@ -1,95 +1,35 @@
-import json
 import torch
-from tqdm import tqdm
 from model_1rvq import PromptCondAudioDiffusion
-from diffusers import DDIMScheduler, DDPMScheduler
-import torchaudio
-import librosa
-import os
+from sat_1dvae_large import get_model
 import math
 import numpy as np
-from tools.get_1dvae_large import get_model
-import tools.torch_tools as torch_tools
 from safetensors.torch import load_file
 
 class Tango:
     def __init__(self, \
         model_path, \
-        vae_config="",
-        vae_model="",
+        cfg,
         layer_num=6, \
         device="cuda:0"):
         
         self.sample_rate = 48000
-        scheduler_name = "configs/scheduler/stable_diffusion_2.1_largenoise_sample.json"
         self.device = device
 
-        self.vae = get_model(vae_config, vae_model)
-        self.vae = self.vae.to(device)
-        self.vae=self.vae.eval()
+        self.vae = get_model(cfg.vae_config, cfg.vae_model)
+        self.vae = self.vae.to(device).eval()
         self.layer_num = layer_num
 
-        self.MAX_DURATION = 360
-        main_config = {
-            "num_channels":32,
-            "unet_model_name":None,
-            "unet_model_config_path":"configs/models/transformer2D_wocross_inch112_1x4_multi_large.json",
-            "snr_gamma":None,
-        }
-        self.model = PromptCondAudioDiffusion(**main_config).to(device)
+        self.MAX_DURATION = cfg.lyric_processor.max_dur
+        self.model = PromptCondAudioDiffusion()
         if model_path.endswith(".safetensors"):
             main_weights = load_file(model_path)
         else:
-            main_weights = torch.load(model_path, map_location=device)
-        self.model.load_state_dict(main_weights, strict=False)
+            main_weights = torch.load(model_path, map_location="cpu", mmap=True, weights_only=True)
+        self.model.load_state_dict(main_weights, strict=False, assign=True)
+        self.model.to(device)
         print ("Successfully loaded checkpoint from:", model_path)
-        
         self.model.eval()
         self.model.init_device_dtype(torch.device(device), torch.float32)
-        
-        # self.scheduler = DDIMScheduler.from_pretrained( \
-        #     scheduler_name, subfolder="scheduler")
-        # self.scheduler = DDPMScheduler.from_pretrained( \
-        #     scheduler_name, subfolder="scheduler")
-        # print("Successfully loaded inference scheduler from {}".format(scheduler_name))
-
-    # def sound2sound(self, orig_samples, lyric, st_et, batch_size=1, duration=40.96, steps=200, disable_progress=False,scenario = "start_seg"):
-    #     """ Genrate audio without condition. """
-    #     with torch.no_grad():
-    #         if(orig_samples.shape[-1]<int(duration*48000)+480):
-    #             orig_samples =  torch.cat([orig_samples, torch.zeros(orig_samples.shape[0], int(duration*48000+480)-orig_samples.shape[-1], \
-    #                 dtype=orig_samples.dtype, device=orig_samples.device)], -1)
-
-    #         orig_samples = orig_samples.to(self.device)
-    #         saved_samples = orig_samples[:,0:40*48000].clamp(-1,1)
-    #         orig_samples = orig_samples[:,0:40*48000].clamp(-1,1)
-    #         max_volume = orig_samples.abs().max(dim=-1)[0]
-    #         orig_samples = orig_samples/max_volume.unsqueeze(-1)
-    #         print("orig_samples.shape", orig_samples.shape)
-
-    #         latent_length = int((st_et[1] - st_et[0]) * 48000) // 1920 + 1
-
-    #         true_latents = self.vae.encode_audio(orig_samples).permute(0,2,1)
-
-    #         print("true_latents.shape", true_latents.shape)
-    #         latents = self.model.inference(orig_samples.repeat(batch_size, 1), [lyric, ]*batch_size, true_latents, latent_length, additional_feats=[], guidance_scale=1.5, num_steps = steps, disable_progress=disable_progress,layer=6, scenario = scenario)
-    #         print("latents.shape", latents.shape)
-    #         print("latent_length", latent_length)
-
-    #         latents = latents[:,:,:latent_length]
-    #         audio = self.vae.decode_audio(latents)
-    #         print("audio.shape:",audio.shape)
-    #         audio = torch.cat((audio, torch.zeros(audio.shape[0],audio.shape[1], 48000*40 - audio.shape[-1], dtype=audio.dtype, device=audio.device)), dim=-1)
-    #         print("audio.shape:",audio.shape)
-    #         # audio = audio.reshape(audio.shape[0]//2, 2, -1)
-    #         # audio = torch.from_numpy(audio)
-
-    #         if(saved_samples.shape[-1]<audio.shape[-1]):
-    #             saved_samples = torch.cat([saved_samples, torch.zeros(saved_samples.shape[0], audio.shape[-1]-saved_samples.shape[-1], dtype=saved_samples.dtype, device=saved_samples.device)],-1)
-    #         else:
-    #             saved_samples = saved_samples[:,0:audio.shape[-1]]
-    #         output = torch.cat([saved_samples.detach().cpu(),audio[0].detach().cpu()],0)
-    #     return output
 
     @torch.no_grad()
     @torch.autocast(device_type="cuda", dtype=torch.float32)
@@ -171,9 +111,6 @@ class Tango:
             first_latent_codes = self.sound2code(prompt)
             first_latent_codes_length = first_latent_codes.shape[-1]
             codes = torch.cat([first_latent_codes, codes], -1)
-
-
-
 
         codes_len= codes.shape[-1]
         target_len = int((codes_len - first_latent_codes_length) / 100 * 4 * self.sample_rate)

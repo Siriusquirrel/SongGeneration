@@ -1,18 +1,11 @@
-from collections import namedtuple
-from dataclasses import dataclass
-from functools import lru_cache
-import logging
-import typing as tp
 
-from abc import ABC, abstractmethod
+from functools import lru_cache
+from collections import namedtuple
 import torch
 
-LayoutCoord = namedtuple('LayoutCoord', ['t', 'q'])  # (timestep, codebook index)
-PatternLayout = tp.List[tp.List[LayoutCoord]]  # Sequence of coordinates
-logger = logging.getLogger(__name__)
+LayoutCoord = namedtuple('LayoutCoord', ['t', 'q'])
+PatternLayout = list[list[LayoutCoord]]  # Sequence of coordinates
 
-
-@dataclass
 class Pattern:
     """Base implementation of a pattern over a sequence with multiple codebooks.
 
@@ -37,17 +30,16 @@ class Pattern:
     # corresponding to the original codebook timestep and position.
     # The first list is always an empty list in order to properly insert
     # a special token to start with.
-    layout: PatternLayout
-    timesteps: int
-    code_depth: int
 
-    def __post_init__(self):
+    def __init__(self, layout: PatternLayout, timesteps: int, code_depth: int):
+        self.layout = layout
+        self.timesteps = timesteps
+        self.code_depth = code_depth
         assert len(self.layout) > 0
         assert self.layout[0] == []
         self._validate_layout()
         self._build_reverted_sequence_scatter_indexes = lru_cache(100)(self._build_reverted_sequence_scatter_indexes)
         self._build_pattern_sequence_scatter_indexes = lru_cache(100)(self._build_pattern_sequence_scatter_indexes)
-        logger.info("New pattern, time steps: %d, sequence steps: %d", self.timesteps, len(self.layout))
 
     def _validate_layout(self):
         """Runs checks on the layout to ensure a valid pattern is defined.
@@ -87,7 +79,7 @@ class Pattern:
         valid_step = len(self.layout) - self.max_delay
         return self.layout[:valid_step]
 
-    def get_sequence_coords_with_timestep(self, t: int, q: tp.Optional[int] = None):
+    def get_sequence_coords_with_timestep(self, t: int, q: int | None):
         """Get codebook coordinates in the layout that corresponds to the specified timestep t
         and optionally to the codebook q. Coordinates are returned as a tuple with the sequence step
         and the actual codebook coordinates.
@@ -102,17 +94,17 @@ class Pattern:
                     coords.append((s, code))
         return coords
 
-    def get_steps_with_timestep(self, t: int, q: tp.Optional[int] = None) -> tp.List[int]:
+    def get_steps_with_timestep(self, t: int, q: int | None) -> list[int]:
         return [step for step, coords in self.get_sequence_coords_with_timestep(t, q)]
 
-    def get_first_step_with_timesteps(self, t: int, q: tp.Optional[int] = None) -> tp.Optional[int]:
+    def get_first_step_with_timesteps(self, t: int, q: int | None) -> int | None:
         steps_with_timesteps = self.get_steps_with_timestep(t, q)
         return steps_with_timesteps[0] if len(steps_with_timesteps) > 0 else None
 
     def _build_pattern_sequence_scatter_indexes(self, timesteps: int, 
                                                 code_depth: int, 
                                                 keep_only_valid_steps: bool,
-                                                device: tp.Union[torch.device, str] = 'cpu'):
+                                                device: torch.device | str = 'cpu'):
         """Build scatter indexes corresponding to the pattern, up to the provided sequence_steps.
 
         Args:
@@ -176,7 +168,7 @@ class Pattern:
     def _build_reverted_sequence_scatter_indexes(self, sequence_steps: int, code_depth: int,
                                                  keep_only_valid_steps: bool = False,
                                                  is_model_output: bool = False,
-                                                 device: tp.Union[torch.device, str] = 'cpu'):
+                                                 device: torch.device | str = 'cpu'):
         """Builds scatter indexes required to retrieve the original multi-codebook sequence
         from interleaving pattern.
 
@@ -259,13 +251,12 @@ class Pattern:
         # we append the special token as the last index of our flattened z tensor
         logits = torch.cat([logits, torch.zeros_like(logits[:, :, :1]) + special_token], dim=-1)  # [B, card, K x S]
         values = logits[:, :, indexes.view(-1)]
-                
+
         values = values.view(B, card, K, indexes.shape[-1])
         return values, indexes, mask
 
 
-
-class CodebooksPatternProvider(ABC):
+class CodebooksPatternProvider():
     """Abstraction around providing pattern for interleaving codebooks.
 
     The CodebooksPatternProvider abstraction allows to implement various strategies to
@@ -288,7 +279,6 @@ class CodebooksPatternProvider(ABC):
         self.code_depth = code_depth
         self.get_pattern = lru_cache(100)(self.get_pattern)  # type: ignore
 
-    @abstractmethod
     def get_pattern(self, timesteps: int) -> Pattern:
         """Builds pattern with specific interleaving between codebooks.
 
@@ -321,7 +311,7 @@ class DelayedPatternProvider(CodebooksPatternProvider):
         flatten_first (int): Flatten the first N timesteps.
         empty_initial (int): Prepend with N empty list of coordinates.
     """
-    def __init__(self, code_depth: int, delays: tp.Optional[tp.List[int]] = None,
+    def __init__(self, code_depth: int, delays: list[int] | None,
                  flatten_first: int = 0, empty_initial: int = 0):
         super().__init__(code_depth)
         if delays is None:

@@ -19,16 +19,7 @@
 # limitations under the License.
 """ LLaMA model configuration"""
 
-from transformers.configuration_utils import PretrainedConfig
-from transformers.utils import logging
-
-
-logger = logging.get_logger(__name__)
-
-LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
-
-
-class LlamaConfig(PretrainedConfig):
+class LlamaConfig():
     r"""
     This is the configuration class to store the configuration of a [`LlamaModel`]. It is used to instantiate an LLaMA
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
@@ -72,9 +63,6 @@ class LlamaConfig(PretrainedConfig):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
         rms_norm_eps (`float`, *optional*, defaults to 1e-12):
             The epsilon used by the rms normalization layers.
-        use_cache (`bool`, *optional*, defaults to `True`):
-            Whether or not the model should return the last key/values attentions (not used by all models). Only
-            relevant if `config.is_decoder=True`.
         tie_word_embeddings(`bool`, *optional*, defaults to `False`):
             Whether to tie weight embeddings
         rope_theta (`float`, *optional*, defaults to 10000.0):
@@ -104,8 +92,6 @@ class LlamaConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-    model_type = "llama"
-    keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(
         self,
@@ -119,7 +105,6 @@ class LlamaConfig(PretrainedConfig):
         max_position_embeddings=2048,
         initializer_range=0.02,
         rms_norm_eps=1e-6,
-        use_cache=True,
         pad_token_id=None,
         bos_token_id=1,
         eos_token_id=2,
@@ -146,19 +131,16 @@ class LlamaConfig(PretrainedConfig):
         self.initializer_range = initializer_range
         self.rms_norm_eps = rms_norm_eps
         self.pretraining_tp = pretraining_tp
-        self.use_cache = use_cache
         self.rope_theta = rope_theta
         self.rope_scaling = rope_scaling
         self._rope_scaling_validation()
         self.attention_bias = attention_bias
-
-        super().__init__(
-            pad_token_id=pad_token_id,
-            bos_token_id=bos_token_id,
-            eos_token_id=eos_token_id,
-            tie_word_embeddings=tie_word_embeddings,
-            **kwargs,
-        )
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
+        self.use_flash_attn_2 = kwargs.get("use_flash_attn_2", False)
+        self.use_q8_kv_cache = kwargs.get("use_q8_kv_cache", True)
+        self.q8_kv_cache_mu = kwargs.get("q8_kv_cache_mu", 64.0)
 
     def _rope_scaling_validation(self):
         """

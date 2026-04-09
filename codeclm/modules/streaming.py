@@ -3,12 +3,10 @@ Streaming module API that should be implemented by all Streaming components,
 """
 
 from contextlib import contextmanager
-import typing as tp
 from torch import nn
 import torch
 
-
-State = tp.Dict[str, torch.Tensor]
+State = dict[str, torch.Tensor]
 
 class StreamingModule(nn.Module):
     """Common API for streaming components.
@@ -38,7 +36,7 @@ class StreamingModule(nn.Module):
         self._streaming_state: State = {}
         self._is_streaming = False
 
-    def _apply_named_streaming(self, fn: tp.Any):
+    def _apply_named_streaming(self, fn):
         for name, module in self.named_modules():
             if isinstance(module, StreamingModule):
                 fn(name, module)
@@ -97,7 +95,7 @@ class StreamingModule(nn.Module):
         self._apply_named_streaming(_set)
         assert len(state) == 0, list(state.keys())
 
-    def flush(self, x: tp.Optional[torch.Tensor] = None):
+    def flush(self, x: torch.Tensor = None):
         """Flush any remaining outputs that were waiting for completion.
         Typically, for convolutions, this will add the final padding
         and process the last buffer.

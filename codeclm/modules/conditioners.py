@@ -1,32 +1,46 @@
 
-import typing as tp
 import torch
 import torch.nn as nn
-from dataclasses import dataclass, field, fields
-from itertools import chain
-import warnings
-import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_sequence
-from codeclm.utils.utils import length_to_mask, collate
 from codeclm.modules.streaming import StreamingModule
-from collections import defaultdict
+import re
 from copy import deepcopy
-ConditionType = tp.Tuple[torch.Tensor, torch.Tensor]  # condition, mask
+
+ConditionType = tuple[torch.Tensor, torch.Tensor]  # condition, mask
 
 # ================================================================
 # Condition and Condition attributes definitions
 # ================================================================
-class AudioCondition(tp.NamedTuple):
-    wav: torch.Tensor
-    length: torch.Tensor
-    sample_rate: tp.List[int]
-    path: tp.List[tp.Optional[str]] = []
-    seek_time: tp.List[tp.Optional[float]] = []
-    
-@dataclass
+
+class AudioCondition:
+    def __init__(self, tokens, length, sample_rate, path=None, seek_time=None):
+        self.tokens = tokens
+        self.length = length
+        self.sample_rate = sample_rate
+        self.path = path if path is not None else []
+        self.seek_time = seek_time if seek_time is not None else []
+
+    def __iter__(self):
+        yield self.tokens
+        yield self.length
+        yield self.sample_rate
+        yield self.path
+        yield self.seek_time
+
+    def __repr__(self):
+        if hasattr(self.tokens, 'tolist'):
+            # .detach().cpu() stellt sicher, dass wir nicht versehentlich 
+            # einen Gradienten-Graphen im Log mitziehen oder CUDA-Fehler provozieren
+            content = str(self.tokens.detach().cpu())
+        else:
+            content = str(self.tokens)
+
+        return (f"AudioCondition( tokens={content}, length={self.length}, sr={self.sample_rate}, path={self.path} )")
+
+
 class ConditioningAttributes:
-    text: tp.Dict[str, tp.Optional[str]] = field(default_factory=dict)
-    audio: tp.Dict[str, AudioCondition] = field(default_factory=dict)
+    def __init__(self, text=None, audio=None):
+        self.text = text if text is not None else {}
+        self.audio = audio if audio is not None else {}
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -60,6 +74,9 @@ class ConditioningAttributes:
             out[kind][att] = v
         return out
 
+    def __repr__(self):
+        return f"ConditioningAttributes(text={self.text}, audio={self.audio})"
+
 # ================================================================
 # Conditioner (tokenize and encode raw conditions) definitions
 # ================================================================
@@ -83,7 +100,7 @@ class BaseConditioner(nn.Module):
         else:
             self.output_proj = nn.Linear(dim, output_dim)
 
-    def tokenize(self, *args, **kwargs) -> tp.Any:
+    def tokenize(self, *args, **kwargs):
         """Should be any part of the processing that will lead to a synchronization
         point, e.g. BPE tokenization with transfer to the GPU.
 
@@ -91,7 +108,7 @@ class BaseConditioner(nn.Module):
         """
         raise NotImplementedError()
 
-    def forward(self, inputs: tp.Any) -> ConditionType:
+    def forward(self, inputs) -> ConditionType:
         """Gets input that should be used as conditioning (e.g, genre, description or a waveform).
         Outputs a ConditionType, after the input data was embedded as a dense vector.
 
@@ -118,10 +135,10 @@ class QwTokenizerConditioner(TextConditioner):
             add_token_list.append('.')
         self.text_tokenizer = Qwen2Tokenizer.from_pretrained(token_path)
         if add_token_list != []:
-            self.text_tokenizer.add_tokens(add_token_list, special_tokens=True)        
+            self.text_tokenizer.add_tokens(add_token_list, special_tokens=True)
         voc_size = len(self.text_tokenizer.get_vocab())
         # here initialize a output_proj (nn.Embedding) layer
-        super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643) 
+        super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643)
         self.max_len = max_len
         self.padding_idx =' <|endoftext|>'
 
@@ -130,18 +147,17 @@ class QwTokenizerConditioner(TextConditioner):
         struct_tokens = [i for i in add_token_list if i[0]=='[' and i[-1]==']']
         self.struct_token_ids = [vocab[i] for i in struct_tokens]
         self.pad_token_idx = 151643
-        
+
         self.structure_emb = nn.Embedding(200, output_dim, padding_idx=0)
         # self.split_token_id = vocab["."]
         print("all structure tokens: ", {self.text_tokenizer.convert_ids_to_tokens(i):i for i in self.struct_token_ids})
-        
-    def tokenize(self, x: tp.List[tp.Optional[str]]) -> tp.Dict[str, torch.Tensor]:
+    def tokenize(self, x: list[str]) -> dict[str, torch.Tensor]:
         x = ['<|im_start|>' + xi if xi is not None else "<|im_start|>" for xi in x]
         # x = [xi if xi is not None else "" for xi in x]
         inputs = self.text_tokenizer(x, return_tensors="pt", padding=True)
         return inputs
 
-    def forward(self, inputs: tp.Dict[str, torch.Tensor]) -> ConditionType:
+    def forward(self, inputs: dict[str, torch.Tensor]) -> ConditionType:
         """
         Add structure embeddings of {verse, chorus, bridge} to text/lyric tokens that
         belong to these structures accordingly, 
@@ -169,10 +185,10 @@ class QwTokenizerConditioner(TextConditioner):
         device = self.output_proj.weight.device
         content_embeds = self.output_proj(tokens.to(device))
         structure_embeds = self.structure_emb(tp_cover_range.to(device))
-
         embeds = content_embeds + structure_embeds
+
         return embeds, embeds, mask
-    
+
     def pad_2d_tensor(self, x, max_len, pad_id):
         batch_size, seq_len = x.size()
         pad_len = max_len - seq_len
@@ -193,7 +209,7 @@ class QwTextConditioner(TextConditioner):
                  token_path = "", 
                  max_len = 300,
                  version: str = 'v1'): #""
-        
+
         from transformers import Qwen2Tokenizer
         self.text_tokenizer = Qwen2Tokenizer.from_pretrained(token_path)
         if version != 'v1':
@@ -201,15 +217,14 @@ class QwTextConditioner(TextConditioner):
         voc_size = len(self.text_tokenizer.get_vocab())     
         # here initialize a output_proj (nn.Embedding) layer
         super().__init__(voc_size, output_dim, input_token=True, padding_idx=151643) 
-        
         self.max_len = max_len
-        
-    def tokenize(self, x: tp.List[tp.Optional[str]]) -> tp.Dict[str, torch.Tensor]:
+
+    def tokenize(self, x: list[str]) -> dict[str, torch.Tensor]:
         x = ['<|im_start|>' + xi if xi is not None else "<|im_start|>" for xi in x]
         inputs = self.text_tokenizer(x, return_tensors="pt", padding=True)
         return inputs
 
-    def forward(self, inputs: tp.Dict[str, torch.Tensor], structure_dur = None) -> ConditionType:
+    def forward(self, inputs: dict[str, torch.Tensor], structure_dur = None) -> ConditionType:
         """
         Add structure embeddings of {verse, chorus, bridge} to text/lyric tokens that
         belong to these structures accordingly, 
@@ -224,10 +239,10 @@ class QwTextConditioner(TextConditioner):
                               {[self.text_tokenizer.convert_ids_to_tokens(i.tolist()) for i in tokens]} will be cut!")
             tokens = self.pad_2d_tensor(tokens, self.max_len, 151643).to(self.output_proj.weight.device)
             mask = self.pad_2d_tensor(mask, self.max_len, 0).to(self.output_proj.weight.device)
-    
+
         embeds = self.output_proj(tokens)
         return embeds, embeds, mask
-    
+
     def pad_2d_tensor(self, x, max_len, pad_id):
         batch_size, seq_len = x.size()
         pad_len = max_len - seq_len
@@ -245,7 +260,7 @@ class QwTextConditioner(TextConditioner):
 
 class AudioConditioner(BaseConditioner):
     ...
-    
+
 class QuantizedEmbeddingConditioner(AudioConditioner):
     def __init__(self, dim: int, 
                  code_size: int, 
@@ -265,31 +280,29 @@ class QuantizedEmbeddingConditioner(AudioConditioner):
 
     def tokenize(self, x: AudioCondition) -> AudioCondition:
         """no extra ops"""
-        # wav, length, sample_rate, path, seek_time = x
-        # assert length is not None        
-        return x #AudioCondition(wav, length, sample_rate, path, seek_time)
+        return x
 
     def forward(self, x: AudioCondition):
-        wav, lengths, *_ = x
-        B = wav.shape[0]
-        wav = wav.reshape(B, self.code_depth, -1).long()
-        if wav.shape[2] < self.max_len - 1:
-            wav = F.pad(wav, [0, self.max_len - 1 - wav.shape[2]], value=self.vocab_size+1)
+        tokens, lengths, *_ = x
+        B = tokens.shape[0]
+        tokens = tokens.reshape(B, self.code_depth, -1).long()
+        target_seq_len = self.max_len - 1
+        current_seq_len = tokens.shape[-1]
+        if current_seq_len < target_seq_len:
+            tokens = F.pad(tokens, [0, target_seq_len - current_seq_len], value=self.vocab_size+1)
         else:
-            wav = wav[:, :, :self.max_len-1]
-        embeds1 = self.emb[0](wav[:, 0])
-        embeds1 = torch.cat((self.EOT_emb.unsqueeze(0).repeat(B, 1, 1), 
-                                embeds1), dim=1)
-        embeds2 = sum([self.emb[k](wav[:, k]) for k in range(1, self.code_depth)]) # B,T,D
-        embeds2 = torch.cat((self.layer2_EOT_emb.unsqueeze(0).repeat(B, 1, 1), 
-                             embeds2), dim=1)  
-        lengths = lengths + 1
-        lengths = torch.clamp(lengths, max=self.max_len)
-
+            tokens = tokens[:, :, :target_seq_len]
+        embeds1 = self.emb[0](tokens[:, 0])
+        embeds1 = torch.cat((self.EOT_emb.expand(B, 1, -1), embeds1), dim=1)
+        temp_list = [self.emb[k](tokens[:, k]) for k in range(1, self.code_depth)] # B,T,D
+        embeds2 = torch.stack(temp_list).sum(dim=0)
+        embeds2 = torch.cat((self.layer2_EOT_emb.expand(B, 1, -1), embeds2), dim=1)
         if lengths is not None:
-            mask = length_to_mask(lengths, max_len=embeds1.shape[1]).int()  # type: ignore
+            lengths = torch.clamp(lengths + 1, max=self.max_len)
+            assert len(lengths.shape) == 1, "Length shape should be 1 dimensional."
+            mask = (torch.arange(self.max_len, device=lengths.device)[None, :] < lengths[:, None]).int()
         else:
-            mask = torch.ones((B, self.code_depth), device=embeds1.device, dtype=torch.int)
+            mask = torch.ones((B, self.max_len), device=embeds1.device, dtype=torch.int)
         return embeds1, embeds2, mask
 
 
@@ -303,7 +316,7 @@ class ConditionerProvider(nn.Module):
         conditioners (dict): Dictionary of conditioners.
         device (torch.device or str, optional): Device for conditioners and output condition types.
     """
-    def __init__(self, conditioners: tp.Dict[str, BaseConditioner]):
+    def __init__(self, conditioners: dict[str, BaseConditioner]):
         super().__init__()
         self.conditioners = nn.ModuleDict(conditioners)
 
@@ -319,7 +332,7 @@ class ConditionerProvider(nn.Module):
     def has_audio_condition(self):
         return len(self.audio_conditions) > 0
 
-    def tokenize(self, inputs: tp.List[ConditioningAttributes]) -> tp.Dict[str, tp.Any]:
+    def tokenize(self, inputs: list[ConditioningAttributes]) -> dict[str, object]:
         """Match attributes/audios with existing conditioners in self, and compute tokenize them accordingly.
         This should be called before starting any real GPU work to avoid synchronization points.
         This will return a dict matching conditioner names to their arbitrary tokenized representations.
@@ -329,7 +342,7 @@ class ConditionerProvider(nn.Module):
                 text and audio conditions.
         """
         assert all([isinstance(x, ConditioningAttributes) for x in inputs]), (
-            "Got unexpected types input for conditioner! should be tp.List[ConditioningAttributes]",
+            "Got unexpected types input for conditioner! should be list[ConditioningAttributes]",
             f" but types were {set([type(x) for x in inputs])}")
 
         output = {}
@@ -340,11 +353,12 @@ class ConditionerProvider(nn.Module):
             f"Got an unexpected attribute! Expected {self.conditioners.keys()}, ",
             f"got {text.keys(), audios.keys()}")
 
-        for attribute, batch in chain(text.items(), audios.items()):
+        combined_items = text | audios
+        for attribute, batch in combined_items.items():
             output[attribute] = self.conditioners[attribute].tokenize(batch)
         return output
 
-    def forward(self, tokenized: tp.Dict[str, tp.Any], structure_dur = None) -> tp.Dict[str, ConditionType]:
+    def forward(self, tokenized: dict[str, object], structure_dur = None) -> dict[str, ConditionType]:
         """Compute pairs of `(embedding, mask)` using the configured conditioners and the tokenized representations.
         The output is for example:
         {
@@ -365,7 +379,7 @@ class ConditionerProvider(nn.Module):
             output[attribute] = (condition1, condition2, mask)
         return output
 
-    def _collate_text(self, samples: tp.List[ConditioningAttributes]) -> tp.Dict[str, tp.List[tp.Optional[str]]]:
+    def _collate_text(self, samples: list[ConditioningAttributes]) -> dict[str, list[str]]:
         """Given a list of ConditioningAttributes objects, compile a dictionary where the keys
         are the attributes and the values are the aggregated input per attribute.
         For example:
@@ -385,14 +399,13 @@ class ConditionerProvider(nn.Module):
         Returns:
             dict[str, list[str, optional]]: A dictionary mapping an attribute name to text batch.
         """
-        out: tp.Dict[str, tp.List[tp.Optional[str]]] = defaultdict(list)
-        texts = [x.text for x in samples]
-        for text in texts:
+        out = {condition: [] for condition in self.text_conditions}
+        for x in samples:
             for condition in self.text_conditions:
-                out[condition].append(text[condition])
+                out[condition].append(x.text[condition])
         return out
 
-    def _collate_audios(self, samples: tp.List[ConditioningAttributes]) -> tp.Dict[str, AudioCondition]:
+    def _collate_audios(self, samples: list[ConditioningAttributes]) -> dict[str, AudioCondition]:
         """Generate a dict where the keys are attributes by which we fetch similar audios,
         and the values are Tensors of audios according to said attributes.
 
@@ -407,31 +420,32 @@ class ConditionerProvider(nn.Module):
         Returns:
             dict[str, WavCondition]: A dictionary mapping an attribute name to wavs.
         """
-        # import pdb; pdb.set_trace()
-        wavs = defaultdict(list)
-        lengths = defaultdict(list)
-        sample_rates = defaultdict(list)
-        paths = defaultdict(list)
-        seek_times = defaultdict(list)
-        out: tp.Dict[str, AudioCondition] = {}
+        tokens = {attr: [] for attr in self.audio_conditions}
+        lengths = {attr: [] for attr in self.audio_conditions}
+        sample_rates = {attr: [] for attr in self.audio_conditions}
+        paths = {attr: [] for attr in self.audio_conditions}
+        seek_times = {attr: [] for attr in self.audio_conditions}
+        out: dict[str, AudioCondition] = {}
 
         for sample in samples:
             for attribute in self.audio_conditions:
-                wav, length, sample_rate, path, seek_time = sample.audio[attribute]
-                assert wav.dim() == 3, f"Got wav with dim={wav.dim()}, but expected 3 [1, C, T]"
-                assert wav.size(0) == 1, f"Got wav [B, C, T] with shape={wav.shape}, but expected B == 1"
-                wavs[attribute].append(wav.flatten())  # [C*T]
+                token, length, sample_rate, path, seek_time = sample.audio[attribute]
+                assert token.dim() == 3, f"Got tokens with dim={token.dim()}, but expected 3 [1, C, T]"
+                assert token.size(0) == 1, f"Got tokens [B, C, T] with shape={token.shape}, but expected B == 1"
+                tokens[attribute].append(token.squeeze(0).transpose(0, 1))
                 lengths[attribute].append(length)
                 sample_rates[attribute].extend(sample_rate)
                 paths[attribute].extend(path)
                 seek_times[attribute].extend(seek_time)
 
-        # stack all wavs to a single tensor
+        # stack all tokens to a single tensor
         for attribute in self.audio_conditions:
-            stacked_wav, _ = collate(wavs[attribute], dim=0)
+            conditioner = self.conditioners[attribute]
+            pad_val = getattr(conditioner, 'vocab_size', 0) + 1
+            padded_tokens = torch.nn.utils.rnn.pad_sequence(tokens[attribute], batch_first=False, padding_value=pad_val)
+            stacked_tokens = padded_tokens.permute(1, 2, 0)
             out[attribute] = AudioCondition(
-                stacked_wav.unsqueeze(1), 
-                torch.cat(lengths[attribute]), sample_rates[attribute],
+                stacked_tokens, torch.cat(lengths[attribute]), sample_rates[attribute],
                 paths[attribute], seek_times[attribute])
 
         return out
@@ -442,7 +456,7 @@ class ConditionFuser(StreamingModule):
     to the actual model input.
 
     Args:
-        fuse2cond (tp.Dict[str, str]): A dictionary that says how to fuse
+        fuse2cond (dict[str, str]): A dictionary that says how to fuse
             each condition. For example:
             {
                 "prepend": ["description"],
@@ -450,23 +464,23 @@ class ConditionFuser(StreamingModule):
             }
     """
     FUSING_METHODS = ["sum", "prepend"] #, "cross", "input_interpolate"] (not support in this simplest version)
-    
-    def __init__(self, fuse2cond: tp.Dict[str, tp.List[str]]):
+
+    def __init__(self, fuse2cond: dict[str, list[str]]):
         super().__init__()
         assert all([k in self.FUSING_METHODS for k in fuse2cond.keys()]
         ), f"Got invalid fuse method, allowed methods: {self.FUSING_METHODS}"
-        self.fuse2cond: tp.Dict[str, tp.List[str]] = fuse2cond
-        self.cond2fuse: tp.Dict[str, str] = {}
+        self.fuse2cond: dict[str, list[str]] = fuse2cond
+        self.cond2fuse: dict[str, str] = {}
         for fuse_method, conditions in fuse2cond.items():
             for condition in conditions:
                 self.cond2fuse[condition] = fuse_method
-                
+
     def forward(
         self,
         input1: torch.Tensor,
         input2: torch.Tensor,
-        conditions: tp.Dict[str, ConditionType]
-    ) -> tp.Tuple[torch.Tensor, tp.Optional[torch.Tensor]]:
+        conditions: dict[str, ConditionType]
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Fuse the conditions to the provided model input.
 
         Args:
@@ -477,7 +491,6 @@ class ConditionFuser(StreamingModule):
                 after the conditions have been fused. The second output tensor is the tensor
                 used for cross-attention or None if no cross attention inputs exist.
         """
-        #import pdb; pdb.set_trace()
         B, T, _ = input1.shape
 
         if 'offsets' in self._streaming_state:
@@ -490,15 +503,15 @@ class ConditionFuser(StreamingModule):
         assert set(conditions.keys()).issubset(set(self.cond2fuse.keys())), \
             f"given conditions contain unknown attributes for fuser, " \
             f"expected {self.cond2fuse.keys()}, got {conditions.keys()}"
-        
-        # if 'prepend' mode is used, 
+
+        # if 'prepend' mode is used,
         # the concatenation order will be the SAME with the conditions in config:
         # prepend: ['description', 'prompt_audio'] (then goes the input)
         fused_input_1 = input1
         fused_input_2 = input2
         for fuse_op in self.fuse2cond.keys():
             fuse_op_conditions = self.fuse2cond[fuse_op]
-            if fuse_op == 'sum' and len(fuse_op_conditions) > 0:                
+            if fuse_op == 'sum' and len(fuse_op_conditions) > 0:
                 for cond in fuse_op_conditions:
                     this_cond_1, this_cond_2, cond_mask = conditions[cond]
                     fused_input_1 += this_cond_1
@@ -507,7 +520,7 @@ class ConditionFuser(StreamingModule):
                 if not first_step:
                     continue
                 reverse_list = deepcopy(fuse_op_conditions)
-                reverse_list.reverse()              
+                reverse_list.reverse()
                 for cond in reverse_list:
                     this_cond_1, this_cond_2, cond_mask = conditions[cond]
                     fused_input_1 = torch.cat((this_cond_1, fused_input_1), dim=1)  # concat along T dim
@@ -520,8 +533,6 @@ class ConditionFuser(StreamingModule):
 
         return fused_input_1, fused_input_2
 
-    
-    
 # ================================================================
 # Condition Dropout
 # ================================================================
@@ -531,7 +542,6 @@ class DropoutModule(nn.Module):
         super().__init__()
         self.rng = torch.Generator()
         self.rng.manual_seed(seed)
-        
 
 
 class ClassifierFreeGuidanceDropout(DropoutModule):
@@ -547,25 +557,22 @@ class ClassifierFreeGuidanceDropout(DropoutModule):
         self.p = p
 
     def check(self, sample, condition_type, condition):
-        
         if condition_type not in ['text', 'audio']:
             raise ValueError("dropout_condition got an unexpected condition type!"
                 f" expected 'text', 'audio' but got '{condition_type}'")
-
         if condition not in getattr(sample, condition_type):
             raise ValueError(
                 "dropout_condition received an unexpected condition!"
                 f" expected audio={sample.audio.keys()} and text={sample.text.keys()}"
                 f" but got '{condition}' of type '{condition_type}'!")
-    
-    
-    def get_null_wav(self, wav, sr=48000) -> AudioCondition: 
-        out = wav * 0 + 16385
+
+    def get_padding_tokens(self, tokens, sr=48000) -> AudioCondition: 
+        out = tokens * 0 + 16385
         return AudioCondition(
-            wav=out, 
+            tokens=out, 
             length=torch.Tensor([0]).long(),
-            sample_rate=[sr],)
-        
+            sample_rate=[sr])
+
     def dropout_condition(self, 
                           sample: ConditioningAttributes, 
                           condition_type: str, 
@@ -576,16 +583,16 @@ class ClassifierFreeGuidanceDropout(DropoutModule):
         Works in-place.
         """
         self.check(sample, condition_type, condition)
-        
+
         if condition_type == 'audio':
             audio_cond = sample.audio[condition] 
-            sample.audio[condition] = self.get_null_wav(audio_cond.wav, sr=audio_cond.sample_rate[0])
+            sample.audio[condition] = self.get_padding_tokens(audio_cond.tokens, sr=audio_cond.sample_rate[0])
         else:
             sample.text[condition] = None
 
         return sample
-    
-    def forward(self, samples: tp.List[ConditioningAttributes]) -> tp.List[ConditioningAttributes]:
+
+    def forward(self, samples: list[ConditioningAttributes]) -> list[ConditioningAttributes]:
         """
         Args:
             samples (list[ConditioningAttributes]): List of conditions.
@@ -610,8 +617,8 @@ class ClassifierFreeGuidanceDropout(DropoutModule):
 
     def __repr__(self):
         return f"ClassifierFreeGuidanceDropout(p={self.p})"
-    
-    
+
+
 class ClassifierFreeGuidanceDropoutInference(ClassifierFreeGuidanceDropout):
     """Classifier Free Guidance dropout during inference.
     All attributes are dropped with the same probability.
@@ -622,9 +629,10 @@ class ClassifierFreeGuidanceDropoutInference(ClassifierFreeGuidanceDropout):
     """
     def __init__(self, seed: int = 1234):
         super().__init__(p=1, seed=seed)
+        self._struct_re = re.compile(r'\[inst\]|\[outro\]|\[intro\]|\[verse\]|\[chorus\]|\[bridge\]')
 
     def dropout_condition_customized(self,
-                                     sample: ConditioningAttributes, 
+                                    sample: ConditioningAttributes,
                                     condition_type: str, 
                                     condition: str,
                                     customized: list = None) -> ConditioningAttributes:
@@ -632,46 +640,39 @@ class ClassifierFreeGuidanceDropoutInference(ClassifierFreeGuidanceDropout):
         If the condition is of type "audio", then nullify it using `nullify_condition` function.
         If the condition is of any other type, set its value to None.
         Works in-place.
-        """        
+        """
         self.check(sample, condition_type, condition)
 
         if condition_type == 'audio':
             audio_cond = sample.audio[condition]
-            depth = audio_cond.wav.shape[1]
-            sample.audio[condition] = self.get_null_wav(audio_cond.wav, sr=audio_cond.sample_rate[0])
-        else:
-            if customized is None:
-                if condition in ['type_info'] and sample.text[condition] is not None:
-                    if "[Musicality-very-high]" in sample.text[condition]:
-                        sample.text[condition] = "[Musicality-very-low], ."
-                        print(f"cfg unconditioning: change sample.text[condition] to [Musicality-very-low]")
-                    else:
-                        sample.text[condition] = None
-                else:
-                    sample.text[condition] = None
+            sample.audio[condition] = self.get_padding_tokens(audio_cond.tokens, sr=audio_cond.sample_rate[0])
+        elif customized is None:
+            val = sample.text.get(condition)
+            if condition in ['type_info'] and val and "[Musicality-very-high]" in val:
+                sample.text[condition] = "[Musicality-very-low], ."
+                print(f"cfg unconditioning: change sample.text[condition] to [Musicality-very-low]")
             else:
-                text_cond = deepcopy(sample.text[condition])
-                if "structure" in customized:
-                    for _s in ['[inst]', '[outro]', '[intro]', '[verse]', '[chorus]', '[bridge]']:                
-                        text_cond = text_cond.replace(_s, "")
-                    text_cond = text_cond.replace(' , ', '')
-                    text_cond = text_cond.replace("  ", " ")
-                if '.' in customized:
-                    text_cond = text_cond.replace(" . ", " ")
-                    text_cond = text_cond.replace(".", " ")
-                    
-                sample.text[condition] = text_cond
+                sample.text[condition] = None
+        else:
+            text_cond = sample.text[condition]
+            if "structure" in customized:
+                text_cond = self._struct_re.sub("", text_cond)
+                text_cond = text_cond.replace(' , ', '').replace("  ", " ")
+            if '.' in customized:
+                text_cond = text_cond.replace(".", " ").replace("  ", " ")
+
+            sample.text[condition] = text_cond.strip()
 
         return sample
 
-    def forward(self, samples: tp.List[ConditioningAttributes],
-                condition_types=["wav", "text"],
+    def forward(self, samples: list[ConditioningAttributes],
+                condition_types=["tokens", "text"],
                 customized=None,
-                ) -> tp.List[ConditioningAttributes]:
+                ) -> list[ConditioningAttributes]:
         """
-        100% dropout some condition attributes (description, prompt_wav) or types (text, wav) of 
+        100% dropout some condition attributes (description, prompt_tokens) or types (text, tokens) of
         samples during inference.
-        
+
         Args:
             samples (list[ConditioningAttributes]): List of conditions.
         Returns:
@@ -680,10 +681,12 @@ class ClassifierFreeGuidanceDropoutInference(ClassifierFreeGuidanceDropout):
         new_samples = deepcopy(samples)
         for condition_type in condition_types:
             for sample in new_samples:
-                for condition in sample.attributes[condition_type]:
-                    self.dropout_condition_customized(sample, condition_type, condition, customized)  
+                target_dict = getattr(sample, condition_type, {})
+                for condition in list(target_dict.keys()):
+                    self.dropout_condition_customized(sample, condition_type, condition, customized)
         return new_samples
-    
+
+
 class AttributeDropout(ClassifierFreeGuidanceDropout):
     """Dropout with a given probability per attribute.
     This is different from the behavior of ClassifierFreeGuidanceDropout as this allows for attributes
@@ -692,7 +695,7 @@ class AttributeDropout(ClassifierFreeGuidanceDropout):
     must also be dropped.
 
     Args:
-        p (tp.Dict[str, float]): A dict mapping between attributes and dropout probability. For example:
+        p (dict[str, float]): A dict mapping between attributes and dropout probability. For example:
             ...
             "genre": 0.1,
             "artist": 0.5,
@@ -701,15 +704,13 @@ class AttributeDropout(ClassifierFreeGuidanceDropout):
         active_on_eval (bool, optional): Whether the dropout is active at eval. Default to False.
         seed (int, optional): Random seed.
     """
-    def __init__(self, p: tp.Dict[str, tp.Dict[str, float]], active_on_eval: bool = False, seed: int = 1234):
+    def __init__(self, p: dict[str, dict[str, float]], active_on_eval: bool = False, seed: int = 1234):
         super().__init__(p=p, seed=seed)
         self.active_on_eval = active_on_eval
         # construct dict that return the values from p otherwise 0
-        self.p = {}
-        for condition_type, probs in p.items():
-            self.p[condition_type] = defaultdict(lambda: 0, probs)
-    
-    def forward(self, samples: tp.List[ConditioningAttributes]) -> tp.List[ConditioningAttributes]:
+        self.p = p
+
+    def forward(self, samples: list[ConditioningAttributes]) -> list[ConditioningAttributes]:
         """
         Args:
             samples (list[ConditioningAttributes]): List of conditions.
@@ -720,7 +721,7 @@ class AttributeDropout(ClassifierFreeGuidanceDropout):
             return samples
 
         samples = deepcopy(samples)
-        for condition_type, ps in self.p.items():  # for condition types [text, wav]
+        for condition_type, ps in self.p.items():  # for condition types [text, tokens]
             for condition, p in ps.items():  # for attributes of each type (e.g., [artist, genre])
                 if torch.rand(1, generator=self.rng).item() < p:
                     for sample in samples:

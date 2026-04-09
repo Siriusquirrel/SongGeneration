@@ -1,0 +1,26 @@
+# 1. Frau-Vektor vorbereiten (16 Kanäle zu 32 aufblasen)
+spk_16 = self.model.extract_spk_embeds(p_v)
+# WICHTIG: Die Form muss (1, 1, 1, 32) sein, damit der .repeat() im Modell klappt
+spk_32 = torch.cat([spk_16, torch.zeros_like(spk_16)], dim=-1) 
+
+# 2. Im Loop (Sliding Window):
+for sinx in range(0, codes_vocal.shape[-1] - hop_frames, hop_frames):
+    # ... c_v_in, c_b_in ...
+
+    latents = self.model.inference_codes(
+        codes=[c_v_in, c_b_in],
+        spk_embeds=spk_32,          # Die Frau als konstanter Stil-Anker
+        true_latents=in_context,    # Das Ende des Vorherigen
+        latent_length=min_frames,
+        additional_feats=['spk'],   # SCHALTER AN!
+        incontext_length=ovlp_frames if sinx > 0 else first_latent_length,
+        guidance_scale=7.5,         # Höherer CFG, damit 'spk' gegen 'codes' gewinnt
+        scenario='other_seg'
+    )
+
+    # KONTEXT-UPDATE (Überlebenswichtig!)
+    # Nimm das Ende der aktuellen Generierung als neuen Startpunkt
+    # Achte darauf, dass in_context die Form (B, Channels, Seq) für den nächsten Aufruf hat
+    in_context = latents[:, :, -ovlp_frames:] 
+    
+    latent_list.append(latents)

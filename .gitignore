@@ -1,3 +1,12 @@
 launchs/
+out/
 **/__pycache__
 sample/generated/
+*.pth
+*.bin
+*.ckpt
+*.pt
+*.safetensors
+*.csv
+*.swp
+.venv/
