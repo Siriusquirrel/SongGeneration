@@ -6,7 +6,7 @@ lyric_processor:
   pad_to_max: true
 
 # ================ Audio tokenzier ================ #
-audio_tokenizer_checkpoint: Flow1dVAE1rvq_./ckpt/model_1rvq/model_1rvq.safetensors
+audio_tokenizer_checkpoint: Flow1dVAE1rvq_./ckpt/model_1rvq/model_1rvq_fp32.safetensors
 audio_tokenizer_frame_rate: 25
 audio_tokenizer_code_depth: 1
 sample_rate: 48000
@@ -30,8 +30,8 @@ lm:
   num_layers_sub: 12
   code_depth: 3
   code_size: 16384
-  max_position_embeddings: 8192       # was 10000
-  max_position_embeddings_sub: 8192   # was 10000
+  max_position_embeddings: 8210       # was 10000
+  max_position_embeddings_sub: 8210   # was 10000
   rope_theta: 500000.0
   rope_theta_sub: 500000.0
   dropout: 0.0

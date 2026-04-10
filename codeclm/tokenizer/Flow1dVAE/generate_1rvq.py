@@ -40,7 +40,7 @@ class Tango:
             audios = orig_samples.to(self.device)
         else:
             assert orig_samples.ndim in (2,3), orig_samples.shape
-        audios = self.preprocess_audio(audios)
+#        audios = self.preprocess_audio(audios) # is done in model_1rvq
         audios = audios.squeeze(0)
         orig_length = audios.shape[-1]
         min_samples = int(40 * self.sample_rate)
@@ -99,13 +99,8 @@ class Tango:
             else:
                 # else choose from 20.48s which might includes verse or chorus
                 prompt = prompt[:,int(20*self.sample_rate):int(30*self.sample_rate)] # limit max length to 10.24
-            
+
             true_latent = self.vae.encode_audio(prompt).permute(0,2,1)
-            # print("true_latent.shape", true_latent.shape)
-            # print("first_latent.shape", first_latent.shape)
-            #true_latent.shape torch.Size([1, 250, 64])
-            # first_latent.shape torch.Size([1, 1000, 64])
-            
             first_latent[:,0:true_latent.shape[1],:] = true_latent
             first_latent_length = true_latent.shape[1]
             first_latent_codes = self.sound2code(prompt)
@@ -173,16 +168,6 @@ class Tango:
             output = output[:, 0:target_len]
         return output
 
-    @torch.no_grad()
-    def preprocess_audio(self, input_audios, threshold=0.8):
-        assert len(input_audios.shape) == 3, input_audios.shape
-        nchan = input_audios.shape[1]
-        input_audios = input_audios.reshape(input_audios.shape[0], -1)
-        norm_value = torch.ones_like(input_audios[:,0])
-        max_volume = input_audios.abs().max(dim=-1)[0]
-        norm_value[max_volume>threshold] = max_volume[max_volume>threshold] / threshold
-        return input_audios.reshape(input_audios.shape[0], nchan, -1)/norm_value.unsqueeze(-1).unsqueeze(-1)
-    
     @torch.no_grad()
     def sound2sound(self, sound, prompt=None, steps=50, disable_progress=False):
         codes = self.sound2code(sound)

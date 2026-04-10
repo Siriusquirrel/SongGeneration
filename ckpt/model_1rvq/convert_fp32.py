@@ -23,4 +23,4 @@ def convert_safetensors_to_fp32(input_path, output_path):
     print(f"Saving {output_path} ({converted_count} tensors adjusted)...")
     save_file(converted_weights, output_path)
 
-convert_safetensors_to_fp32("model_septoken.safetensors", "model_septoken_fp32.safetensors")
+convert_safetensors_to_fp32("model_1rvq.safetensors", "model_1rvq_fp32.safetensors")

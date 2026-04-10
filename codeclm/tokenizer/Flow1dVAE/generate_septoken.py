@@ -203,10 +203,11 @@ class Tango:
             if audios.shape[0] == 2 and audios.shape[1] == 1:
                 audios = audios.transpose(0, 1)
             assert audios.shape[1] == 2, f"3D Audio muss [B, 2, L] sein, ist {audios.shape}"
-        # Schritt 2: Normalisierung (wie besprochen)
-        max_vals = audios.abs().amax(dim=(1, 2)) 
-        scales = torch.clamp(max_vals / threshold, min=1.0)
-        return audios / scales.view(-1, 1, 1)
+        # Normalisation happens in model_septoken.py
+#        max_vals = audios.abs().amax(dim=(1, 2)) 
+#        scales = torch.clamp(max_vals / threshold, min=1.0)
+#        return audios / scales.view(-1, 1, 1)
+        return audios
     
     @torch.no_grad()
     def sound2sound(self, orig_vocal,orig_bgm, prompt_vocal=None,prompt_bgm=None, steps=50, disable_progress=False):

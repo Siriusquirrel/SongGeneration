@@ -75,7 +75,7 @@ def main():
             input_embeds = torch.cat([input_embeds, padding], dim=-1)
         input_embeds = input_embeds.cuda()
 
-        temp, top_k, top_p, cfg_coef, record_window = 0.8, 5000, 0.0, 1.5, 50
+        temp, top_k, top_p, cfg_coef, record_window = 0.8, 200, 0.9, 1.5, 50
         if "parameters" in item:
             params_list = [p.strip() for p in item["parameters"].split(',')]
             for p in params_list:

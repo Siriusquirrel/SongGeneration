@@ -72,17 +72,16 @@ def generate(args):
             item['raw_vocal_wav'] = audiofile.with_name(audiofile.stem + '_vocal.wav')
             item['raw_bgm_wav']   = audiofile.with_name(audiofile.stem + '_bgm.wav')
             item["raw_wavs"] = True
+            a, sr = sound.load_audio(audiofile)
+            if (sr != 48000):
+                print(f"Resampling {audiofile} to 48000 Hz")
+                a = torchaudio.functional.resample(a, sr, 48000)
+            target_pmt_samples = 48000 * 10 # 10 seconds 48kHz
+            a = a[:, :target_pmt_samples]
+            if a.shape[0] == 1:
+                a = a.repeat(2, 1)
+            pmt_audio=a.to("cuda")
             if not Path(item['raw_vocal_wav']).exists():
-                a, sr = sound.load_audio(audiofile)
-                if (sr != 48000):
-                    print(f"Resampling {audiofile} to 48000 Hz")
-                    a = torchaudio.functional.resample(a, sr, 48000)
-                target_pmt_samples = 48000 * 10 # 10 seconds 48kHz
-                a = a[:, :target_pmt_samples]
-                # Demucs needs 2 channel stereo
-                if a.shape[0] == 1:
-                    a = a.repeat(2, 1)
-                pmt_audio=a.to("cuda")
                 print(f"Separating vocals from bgm for {audiofile}...")
                 with torch.no_grad():
                     # [B, sources, C, T]
@@ -96,7 +95,6 @@ def generate(args):
                 sound.save_audio(item['raw_bgm_wav'], bgm_audio)
                 print(f"Success!\n -> {item['raw_vocal_wav']}\n -> {item['raw_bgm_wav']}")
             else:
-                pmt_audio, _   = sound.load_audio(item['raw_pmt_wav'])
                 vocal_audio, _ = sound.load_audio(item['raw_vocal_wav'])
                 bgm_audio, _   = sound.load_audio(item['raw_bgm_wav'])
 

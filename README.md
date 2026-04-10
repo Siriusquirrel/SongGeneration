@@ -34,7 +34,8 @@ Checkpoints are not included and have to be downloaded from HuggingFace. Please 
 Run the conversion scripts to prepare the models for the 16GB workflow:  
     *   `python ckpt/songgeneration/convert_fp16.py`  
     *   `python ckpt/songgeneration/convert_ckpt_data_structure.py`  
-    *   `python ckpt/model_septoken/convert_fp32.py`
+    *   `python ckpt/model_septoken/convert_fp32.py`  
+    *   `python ckpt/model_1rvq/convert_fp32.py`
 
 ## Workflow (Three-Phase Process)
 
@@ -50,7 +51,7 @@ To minimize VRAM usage, execute the generation in the following sequence:
 #### lyric_processor
 - **max_dur** is the maximum song length in seconds. Default is `280`.
 #### lm
-- **max_position_embeddings** is the maximum kv_cache length for the main transformer. `8192` tokens are needed for a song about 280 seconds long
+- **max_position_embeddings** is the maximum kv_cache length for the main transformer. `8210` tokens are needed for a song about 280 seconds long
 - **max_position_embeddings_sub** is the maximum kv_cache for the sub transfomer. I use the same value here as I used for main.
 - **use_flash_attn_2** `false` activates PyTorch sdpa which on my system is a lot faster than the flash_attn package. If you enable flash attention you automatically use the fp16 kv cache.
 - **use_q8_kv_cache** `true` uses the int8 µ-law cache while `false` uses standard fp16 kv-caching.
