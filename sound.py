@@ -6,7 +6,6 @@ import torch
 
 def load_audio(path):
     audio_np, sr = sf.read(path, dtype='float32', always_2d=True)
-    assert sr == 48000, f"Audio must be 48000 Hz"
     # soundfile: (samples, channels)
     # torch: (channels, samples)
     audio = torch.from_numpy(audio_np.T)
