@@ -13,6 +13,7 @@ import re
 import sound
 import time
 import torch
+import torchaudio
 
 auto_prompt_type = ['Pop', 'Latin', 'Rock', 'Electronic', 'Metal', 'Country', 'R&B/Soul', 'Ballad', 'Jazz', 'World', 'Hip-Hop', 'Funk', 'Soundtrack','Auto']
 
