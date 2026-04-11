@@ -271,10 +271,6 @@ class LmModel(StreamingModule):
             self.linears = nn.ModuleList([nn.Linear(dim, self.code_size, bias=False) 
                                         for _ in range(code_depth - 1)])
 
-    def reset_streaming(self):
-        super().reset_streaming()
-        self._streaming_state = {'current_pos': 0}
-
     @property
     def special_token_id(self) -> int:
         return self.code_size
@@ -350,11 +346,10 @@ class LmModel(StreamingModule):
         temp_list = [self.layer2_emb[k](sequence[:, k]) for k in range(1, K)]
         input_2 = torch.stack(temp_list).sum(dim=0)
         fused_input1, fused_input2 = self.fuser(input_1, input_2, condition_tensors)
-        current_pos = self._streaming_state.get('current_pos')
 
         logits_1, h_states_1 = self.transformer(
             inputs_embeds=fused_input1,
-            current_pos=current_pos
+            current_pos=self.current_pos
         )
         logits = logits_1.unsqueeze(1) # [B, 1, fused_input1.shape[1], card]
 
@@ -364,13 +359,12 @@ class LmModel(StreamingModule):
 
             _, h_states_2 = self.transformer2(
                 inputs_embeds=fused_input2_next,
-                current_pos=current_pos
+                current_pos=self.current_pos
             )
             res_logits = torch.stack([self.linears[k](h_states_2) for k in range(K - 1)], dim=1)  # [B, K-1, fused_input1.shape[1], card]
             logits = torch.cat([logits, res_logits], dim=1)  # [B, K, fused_input1.shape[1], card]
 
-        if self._is_streaming:
-            self._streaming_state['current_pos'] += fused_input1.shape[1]
+        self.current_pos += fused_input1.shape[1]
 
         if len(self.fuser.fuse2cond['prepend']) > 0:
             logits = logits[:, :, -S:, :]
@@ -410,7 +404,7 @@ class LmModel(StreamingModule):
         assert not self.training, "generation shouldn't be used in training mode."
         first_param = next(iter(self.parameters()))
         device = first_param.device
-        self.reset_streaming()
+        self.current_pos = 0
         if record_window > 0:
             self.penalty_histogram.zero_()
             history_buffer = torch.zeros((self.code_depth, record_window), dtype=torch.long, device=device)

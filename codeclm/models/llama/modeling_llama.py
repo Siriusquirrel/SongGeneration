@@ -170,7 +170,7 @@ class LlamaAttentionBase(nn.Module):
     def apply_rotary_pos_emb(self, q, k, cos, sin, position_ids):
         raise NotImplementedError("Subclasses must implement apply_rotary_pos_emb to choose between SDPA and Flash")
 
-    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor, past_key_value: torch.Tensor=None, current_pos: int = 0):
+    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor, past_key_value: torch.Tensor, current_pos: int):
         raise NotImplementedError("Subclasses must implement forward to choose between SDPA and Flash")
 
 
@@ -195,7 +195,7 @@ class LlamaAttentionSdpa(LlamaAttentionBase):
         k_embed[..., half:] = k2 * cos_half + k1 * sin_half
         return q_embed.to(q.dtype), k_embed.to(q.dtype)
 
-    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor, past_key_value: torch.Tensor = None, current_pos: int = 0):
+    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor, past_key_value: torch.Tensor, current_pos: int):
         bsz, q_len, _ = hidden_states.size()
         kv_seq_len = current_pos + q_len
 
@@ -226,7 +226,7 @@ class LlamaAttentionFlash(LlamaAttentionBase):
         from flash_attn import flash_attn_with_kvcache
         self.flash_fn = flash_attn_with_kvcache
 
-    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor, past_key_value: torch.Tensor = None, current_pos: int = 0):
+    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor, past_key_value: torch.Tensor, current_pos: int):
         bsz, q_len, _ = hidden_states.size()
 
         fused_qkv = self.fused_qkv_proj(hidden_states)
@@ -383,7 +383,7 @@ class LlamaModel(nn.Module):
 
     @torch.inference_mode()
     @torch.compile()
-    def forward(self, inputs_embeds: torch.FloatTensor, current_pos: int = 0):
+    def forward(self, inputs_embeds: torch.FloatTensor, current_pos: int):
         # retrieve inputs_embeds
         batch_size, seq_length, _ = inputs_embeds.shape
         position_ids = self.position_ids_cache[:, current_pos : current_pos + seq_length]
@@ -418,7 +418,7 @@ class LlamaForCausalLM(nn.Module):
         self.model = LlamaModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    def forward(self, inputs_embeds: torch.FloatTensor, current_pos: int = 0):
+    def forward(self, inputs_embeds: torch.FloatTensor, current_pos: int):
         hidden_states = self.model(
             inputs_embeds=inputs_embeds,
             current_pos=current_pos
