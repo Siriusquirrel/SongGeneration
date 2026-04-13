@@ -72,7 +72,7 @@ jsonl2conditions.sh --input expects a JSONL file where each line represents a se
 
 See examples under ./sample
 
-## License and Credits
+## Credits
 
 *   **Original Project**: [Tencent SongGeneration](https://github.com/tencent-ailab/SongGeneration)
 *   **Optimizations**: µ-law implementation and refactoring by Siriusquirrel.
