@@ -11,7 +11,6 @@ from omegaconf import OmegaConf, DictConfig
 from tqdm import tqdm
 from codeclm.models.llama.modeling_llama import LlamaForCausalLM
 from codeclm.models.llama.configuration_llama import LlamaConfig
-from codeclm.modules.streaming import StreamingModule
 from codeclm.modules.conditioners import (
     ConditioningAttributes,
     AudioCondition,
@@ -169,7 +168,7 @@ def get_codebooks_pattern_provider(code_depth: int, cfg: DictConfig) -> Codebook
 ConditionTensors = dict[str, ConditionType]
 
 
-class LmModel(StreamingModule):
+class LmModel(nn.Module):
     """Transformer-based language model on multiple streams of codes.
 
     Args:
@@ -345,7 +344,7 @@ class LmModel(StreamingModule):
         input_1 = self.emb[0](sequence[:, 0])
         temp_list = [self.layer2_emb[k](sequence[:, k]) for k in range(1, K)]
         input_2 = torch.stack(temp_list).sum(dim=0)
-        fused_input1, fused_input2 = self.fuser(input_1, input_2, condition_tensors)
+        fused_input1, fused_input2 = self.fuser(input_1, input_2, condition_tensors, self.current_pos==0)
 
         logits_1, h_states_1 = self.transformer(
             inputs_embeds=fused_input1,
@@ -445,11 +444,10 @@ class LmModel(StreamingModule):
         delay_steps = pattern.max_delay
         flush_counter = -1
         # 5) auto-regressive sampling
-        with self.streaming(), torch.inference_mode():
+        with torch.inference_mode():
             gen_sequence_len = gen_sequence.shape[-1]  # gen_sequence shape is [B, K, S]
             prev_offset = 0
             for offset in tqdm(range(start_offset_sequence, gen_sequence_len)):
-                # get current sequence (note that the streaming API is providing the caching over previous offsets)
                 curr_sequence = gen_sequence[..., prev_offset:offset]
                 # sample next token from the model, next token shape is [B, K, 1]
                 next_token = self._sample_next_token(
@@ -527,7 +525,7 @@ class LmModel(StreamingModule):
         Args:
             sequence (torch.Tensor): Current sequence of shape [B, K, S]
                 with K corresponding to the number of codebooks and S the number of sequence steps.
-                S = 1 in streaming mode, except for the first step that contains a bigger prompt.
+                S = 1, except for the first step that contains a bigger prompt.
             condition_tensors (dict[str, ConditionType): Set of conditions. If CFG is used,
                 should be twice the batch size, being the concatenation of the conditions + null conditions.
             use_sampling (bool): Whether to use a sampling strategy or not.

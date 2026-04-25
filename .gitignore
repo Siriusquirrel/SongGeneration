@@ -10,4 +10,4 @@ sample/generated/
 *.csv
 *.swp
 .venv/
-sample/wav/
+sample_private/

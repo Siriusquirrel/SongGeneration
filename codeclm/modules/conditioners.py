@@ -1,7 +1,6 @@
 
 import torch
 import torch.nn as nn
-from codeclm.modules.streaming import StreamingModule
 import re
 from copy import deepcopy
 
@@ -451,7 +450,7 @@ class ConditionerProvider(nn.Module):
         return out
 
 
-class ConditionFuser(StreamingModule):
+class ConditionFuser(nn.Module):
     """Condition fuser handles the logic to combine the different conditions
     to the actual model input.
 
@@ -479,7 +478,8 @@ class ConditionFuser(StreamingModule):
         self,
         input1: torch.Tensor,
         input2: torch.Tensor,
-        conditions: dict[str, ConditionType]
+        conditions: dict[str, ConditionType],
+        first_step: bool
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Fuse the conditions to the provided model input.
 
@@ -492,13 +492,6 @@ class ConditionFuser(StreamingModule):
                 used for cross-attention or None if no cross attention inputs exist.
         """
         B, T, _ = input1.shape
-
-        if 'offsets' in self._streaming_state:
-            first_step = False
-            offsets = self._streaming_state['offsets']
-        else:
-            first_step = True
-            offsets = torch.zeros(input1.shape[0], dtype=torch.long, device=input1.device)
 
         assert set(conditions.keys()).issubset(set(self.cond2fuse.keys())), \
             f"given conditions contain unknown attributes for fuser, " \
@@ -527,9 +520,6 @@ class ConditionFuser(StreamingModule):
                     fused_input_2 = torch.cat((this_cond_2, fused_input_2), dim=1)  # concat along T dim
             elif fuse_op not in self.FUSING_METHODS:
                 raise ValueError(f"unknown op ({fuse_op})")
-
-        if self._is_streaming:
-            self._streaming_state['offsets'] = offsets + T
 
         return fused_input_1, fused_input_2
 

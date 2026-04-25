@@ -58,12 +58,13 @@ To minimize VRAM usage, execute the generation in the following sequence:
 - **q8_kv_cache_mu** You can experiment with different µ-law values here. `64.0` is the default.
 
 ### Input Format (`.jsonl`)
-jsonl2conditions.sh --input expects a JSONL file where each line represents a separate song:  
-`{"idx": "unique_songname", "gt_lyric": "[intro-short] ; [verse] lyrics ; [outro-short]", "descriptions": "style and mood description"}`  
-  See ./conf/vocab.yaml for structure tags within `gt_lyric`.  
-  See ./sample/description/* for different type info for `descriptions`.
+`jsonl2conditions.sh --input_jsonl` expects a JSONL file where each line represents a separate song:  
+`{"idx": "unique_songname", "gt_lyric": "[intro-short] ; [verse] lyrics ; [outro-short]"}`  
+  See `./conf/vocab.yaml` for structure tags within `gt_lyric`.  
 
 **Optional conditioning:**
+- Add `"descriptions": "style and mood description"` for specific text type info for the song.
+  See `./sample/description/*` for different type info for `descriptions`.
 - Add `"prompt_audio_path": "path/to/file.wav"` for specific audio prompts.
 - Add `"auto_prompt_audio_type": "type"` for automatic conditioning.  
   **Supported types:** 'Pop', 'Latin', 'Rock', 'Electronic', 'Metal', 'Country', 'R&B/Soul', 'Ballad', 'Jazz', 'World', 'Hip-Hop', 'Funk', 'Soundtrack' or 'Auto'.
@@ -77,7 +78,7 @@ Parameter descriptions:
 - **`top_p`** – Top-p (nucleus) sampling
 - **`top_k`** – Top-k sampling
 
-See examples under ./sample
+See examples under `./sample`
 
 ## Credits
 

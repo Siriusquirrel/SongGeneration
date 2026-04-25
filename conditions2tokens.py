@@ -88,7 +88,7 @@ def main():
         with torch.inference_mode():
             tokens = audiolm.generate(
                 texts=[item["gt_lyric"]],
-                descriptions=[item['descriptions']],
+                descriptions=[item.get('descriptions', '')],
                 audio_qt_embs=input_embeds,
                 max_gen_len=int(max_duration * 25),
                 temp=temp,
