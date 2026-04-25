@@ -165,7 +165,6 @@ def parse_args():
     return parser.parse_args()
 
 if __name__ == "__main__":
-    OmegaConf.register_new_resolver("eval", lambda x: eval(x))
     np.random.seed(int(time.time()))
 
     args = parse_args()

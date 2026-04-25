@@ -70,9 +70,15 @@ jsonl2conditions.sh --input expects a JSONL file where each line represents a se
 - **Expert Settings:** You can override global settings per song by adding a parameters string:
 `"parameters": "temp:0.9, cfg_coef:1.5, record_window:50, top_p:0.9, top_k:500"`
 
+Parameter descriptions:
+- **`temp`** – Sampling temperature (higher = more creative, typical 0.6–1.0)
+- **`cfg_coef`** – Classifier-Free Guidance coefficient (higher = stronger adherence to description, typical 1.5–4.0)
+- **`record_window`** – Token window size for repetition penalty. Larger values more aggressively suppress repeated tokens. `0` disables the feature.
+- **`top_p`** – Top-p (nucleus) sampling
+- **`top_k`** – Top-k sampling
+
 See examples under ./sample
 
 ## Credits
 
 *   **Original Project**: [Tencent SongGeneration](https://github.com/tencent-ailab/SongGeneration)
-*   **Optimizations**: µ-law implementation and refactoring by Siriusquirrel.

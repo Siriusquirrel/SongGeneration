@@ -296,10 +296,12 @@ class Q8MuLawKVCache:
         bsz, q_len = k.size(0), k.size(1)
         kv_seq_len = current_pos + q_len
 
-        k_abs_max = torch.amax(k.abs(), dim=(1, 2, 3), keepdim=True).clamp(min=1e-5)
-        v_abs_max = torch.amax(v.abs(), dim=(1, 2, 3), keepdim=True).clamp(min=1e-5)
-        k_norm = k / k_abs_max
-        v_norm = v / v_abs_max
+        k_32, v_32 = k.to(torch.float32), v.to(torch.float32)
+        eps = torch.finfo(torch.float32).tiny
+        k_abs_max = torch.amax(k_32.abs(), dim=(1, 2, 3), keepdim=True).clamp(min=eps)
+        v_abs_max = torch.amax(v_32.abs(), dim=(1, 2, 3), keepdim=True).clamp(min=eps)
+        k_norm = k_32 / k_abs_max
+        v_norm = v_32 / v_abs_max
         k_comp = torch.sign(k_norm) * torch.log1p(self.mu * torch.abs(k_norm)) / self.log_mu
         v_comp = torch.sign(v_norm) * torch.log1p(self.mu * torch.abs(v_norm)) / self.log_mu
         self.pk[:bsz, current_pos:kv_seq_len] = (k_comp * 127.0).round().to(torch.int8)
@@ -308,12 +310,13 @@ class Q8MuLawKVCache:
         self.pv_scales[:bsz, current_pos:kv_seq_len] = v_abs_max
 
     def fetch(self, kv_seq_len, bsz):
-        k_deq_log = self.pk[:bsz, :kv_seq_len].to(torch.float16) / 127.0
-        v_deq_log = self.pv[:bsz, :kv_seq_len].to(torch.float16) / 127.0
+        k_deq_log = self.pk[:bsz, :kv_seq_len].to(torch.float32) / 127.0
+        v_deq_log = self.pv[:bsz, :kv_seq_len].to(torch.float32) / 127.0
         k_deq_norm = torch.sign(k_deq_log) * (torch.expm1(torch.abs(k_deq_log) * self.log_mu) / self.mu)
         v_deq_norm = torch.sign(v_deq_log) * (torch.expm1(torch.abs(v_deq_log) * self.log_mu) / self.mu)
-        k_cache = k_deq_norm * self.pk_scales[:bsz, :kv_seq_len]
-        v_cache = v_deq_norm * self.pv_scales[:bsz, :kv_seq_len]
+        target_dtype = self.pk_scales.dtype
+        k_cache = k_deq_norm.to(target_dtype) * self.pk_scales[:bsz, :kv_seq_len]
+        v_cache = v_deq_norm.to(target_dtype) * self.pv_scales[:bsz, :kv_seq_len]
 #        # --- FEHLER-CHECK (SNR-basiert) ---
 #        if current_pos % 100 == 0:
 #            with torch.no_grad():

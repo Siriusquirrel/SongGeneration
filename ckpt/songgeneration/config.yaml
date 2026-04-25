@@ -95,7 +95,7 @@ conditioners:
     qt_embedding:
       code_size: 16384
       code_depth: 3
-      max_len: ${eval:${lyric_processor.prompt_len}*${audio_tokenizer_frame_rate}+2} # 25*10+2+1
+      max_len: 252 # ${eval:${lyric_processor.prompt_len}*${audio_tokenizer_frame_rate}+2} # 25*10+2+1
   description:
     model: QwTokenizer
     QwTokenizer:

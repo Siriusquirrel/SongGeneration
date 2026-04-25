@@ -9,9 +9,6 @@ from pathlib import Path
 import torch
 import gc
 
-if not OmegaConf.has_resolver("eval"):
-    OmegaConf.register_new_resolver("eval", eval)
-
 # ---------------------------------------------------------
 # Argumente
 # ---------------------------------------------------------
