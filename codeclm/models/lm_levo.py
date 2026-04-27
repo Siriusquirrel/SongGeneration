@@ -286,7 +286,7 @@ class LmModel(nn.Module):
         super().train(mode)
         if not mode and not hasattr(self, 'penalty_histogram'):
             device = next(self.parameters()).device
-            self.register_buffer('penalty_histogram', torch.zeros((self.code_depth, self.special_token_id), device=device))
+            self.register_buffer('penalty_histogram', torch.zeros((self.code_depth, self.special_token_id), device=device), persistent=False)
             self.mlp = torch.compile(self.mlp, fullgraph=True, dynamic=False, mode="max-autotune")
         return self
 
@@ -351,6 +351,8 @@ class LmModel(nn.Module):
             current_pos=self.current_pos
         )
         logits = logits_1.unsqueeze(1) # [B, 1, fused_input1.shape[1], card]
+        h_states_1 = h_states_1.clone()
+        torch.compiler.cudagraph_mark_step_begin()
 
         if K > 1:
             fused_input2_combined = torch.cat([fused_input2, h_states_1], dim=-1)

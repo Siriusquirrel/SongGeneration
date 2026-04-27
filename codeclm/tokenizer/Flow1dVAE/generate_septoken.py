@@ -9,7 +9,7 @@ from model_septoken import PromptCondAudioDiffusion
 import math
 from sat_1dvae_large import get_model
 from safetensors.torch import load_file
-
+from tqdm import tqdm
 
 class Tango:
     def __init__(self, \
@@ -67,7 +67,7 @@ class Tango:
 
         v_list, b_list = [], []
         for i in range(0, num_chunks, batch_size):
-            [cv, cb], _, _ = self.model.fetch_codes_batch(
+            cv, cb = self.model.fetch_codes_batch(
                 v_input[i : i + batch_size],
                 b_input[i : i + batch_size],
                 additional_feats=[],
@@ -145,28 +145,33 @@ class Tango:
 
         # 4. Inferenz-Loop (Sliding Window)
         latent_list = []
-        spk_embeds = torch.zeros((1, 32, 1, 32), device=self.device)
         in_context = first_latent
-        with torch.autocast(device_type="cuda", dtype=torch.float16):
-            # Wir stoppen, wenn kein volles Fenster mehr möglich ist
-            for sinx in range(0, codes_vocal.shape[-1] - hop_frames, hop_frames):
-                c_v_in = codes_vocal[:, :, sinx : sinx + min_frames]
-                c_b_in = codes_bgm[:, :, sinx : sinx + min_frames]
-                if c_v_in.shape[-1] < min_frames:
-                    break
-                if sinx == 0:
-                    latents = self.model.inference_codes([c_v_in, c_b_in], spk_embeds, in_context, min_frames, additional_feats=[], incontext_length=first_latent_length, guidance_scale=guidance_scale, num_steps=num_steps, disable_progress=disable_progress, scenario='other_seg')
-                else:
-                    prev_lat_end = latent_list[-1][:, :, -ovlp_frames:].permute(0, 2, 1)
-                    noise = torch.randn(prev_lat_end.shape[0], min_frames - ovlp_frames, 64, device=self.device, dtype=prev_lat_end.dtype)
-                    in_context = torch.cat([prev_lat_end, noise], dim=1)
-                    latents = self.model.inference_codes([c_v_in, c_b_in], spk_embeds, in_context, min_frames, additional_feats=[], incontext_length=ovlp_frames, guidance_scale=guidance_scale, num_steps=num_steps, disable_progress=disable_progress, scenario='other_seg')
-                latent_list.append(latents)
+        first_len_tensor = torch.tensor(first_latent_length, device=self.device)
+        ovlp_len_tensor = torch.tensor(ovlp_frames, device=self.device)
+        B, C, _ = codes_vocal.shape
+        c_v_container = torch.zeros((B, C, min_frames), device=codes_vocal.device, dtype=codes_vocal.dtype).contiguous()
+        c_b_container = torch.zeros((B, C, min_frames), device=codes_bgm.device, dtype=codes_bgm.dtype).contiguous()
+        # Wir stoppen, wenn kein volles Fenster mehr möglich ist
+        for sinx in tqdm(range(0, codes_vocal.shape[-1] - hop_frames, hop_frames), desc="Generating Audio Chunks", unit="chunk"):
+            c_v_slice = codes_vocal[:, :, sinx : sinx + min_frames]
+            c_b_slice = codes_bgm[:, :, sinx : sinx + min_frames]
+            if c_v_slice.shape[-1] < min_frames:
+                break
+            c_v_container.copy_(c_v_slice)
+            c_b_container.copy_(c_b_slice)
+            if sinx == 0:
+                latents = self.model.inference_codes([c_v_container, c_b_container], in_context, min_frames, incontext_length=first_len_tensor, guidance_scale=guidance_scale, num_steps=num_steps)
+            else:
+                prev_lat_end = latent_list[-1][:, -ovlp_frames:, :]
+                noise = torch.randn(prev_lat_end.shape[0], min_frames - ovlp_frames, 64, device=self.device, dtype=prev_lat_end.dtype)
+                in_context = torch.cat([prev_lat_end, noise], dim=1)
+                latents = self.model.inference_codes([c_v_container, c_b_container], in_context, min_frames, incontext_length=ovlp_len_tensor, guidance_scale=guidance_scale, num_steps=num_steps)
+            latent_list.append(latents.clone())
 
         # 5. Audio Rekonstruktion (VAE + Cross-Fade)
         # Prompt-Latents hart abschneiden
         if latent_list:
-            latent_list[0] = latent_list[0][:, :, first_latent_length:]
+            latent_list[0] = latent_list[0][:, first_latent_length:, :]
 
         # Sinus-Cosinus Rampe (Equal Power)
         grid = torch.linspace(0, math.pi / 2, ovlp_samples, device=self.device)
@@ -174,7 +179,7 @@ class Tango:
 
         output = None
         for i, lat in enumerate(latent_list):
-            cur_audio = self.vae.decode_audio(lat.float(), chunked=chunked, chunk_size=chunk_size)
+            cur_audio = self.vae.decode_audio(lat.permute(0, 2, 1).float(), chunked=chunked, chunk_size=chunk_size)
             if cur_audio.ndim == 3: cur_audio = cur_audio[0]
 
             if output is None:

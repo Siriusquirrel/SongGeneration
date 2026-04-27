@@ -7,7 +7,7 @@ This is a performance-optimized fork of the original [SongGeneration](https://gi
 *   **v2 Large on 16GB VRAM**: Achieved through **8-bit µ-law quantization for KV-caching** and **FP16 model conversion** (reducing the model footprint from 13GB to **9.5GB**). Combined with **fused QKV/MLP layers**, these optimizations significantly lower the VRAM entry barrier without sacrificing output quality.
 *   **Long-form Generation**: Support for song lengths up to **280 seconds**.
 *   **Triple-Phase Memory Management**: The workflow is split into three independent stages to ensure only one model occupies the VRAM at a time.
-*   **Precision Balance**: Latent generation is optimized for memory, while the final diffuser stage remains in **full fp32 precision** for high-quality audio output.
+*   **Precision Balance**: Latent generation is optimized for memory, while the final stage runs in full FP32 for high-quality audio reconstruction.
 *   **Code Cleanup**: Redundant dependencies and unused legacy code have been removed to create a streamlined experience.
 
 ## System Requirements
