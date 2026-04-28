@@ -1,3 +1,9 @@
+# Original work Copyright (c) Tencent AI Lab
+# Refactoring and modifications Copyright (c) 2026 Siriusquirrel
+#
+# Part of the SongGeneration-v2-Large-16GB-Fork
+# Modifications: Completely rewrote solve_euler and inference_codes to speedup processing
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

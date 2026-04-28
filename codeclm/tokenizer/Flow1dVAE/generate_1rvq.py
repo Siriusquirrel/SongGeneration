@@ -1,3 +1,8 @@
+# Original work Copyright (c) Tencent AI Lab
+# Refactoring and modifications Copyright (c) 2026 Siriusquirrel
+#
+# Part of the SongGeneration-v2-Large-16GB-Fork
+
 import torch
 from model_1rvq import PromptCondAudioDiffusion
 from sat_1dvae_large import get_model
