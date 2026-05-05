@@ -17,12 +17,11 @@ class PromptCondAudioDiffusion(nn.Module):
     ):
         super().__init__()
 
-        self.bestrq = torch.compile(MusicFMModel(MusicFMConfig()), mode="max-autotune")
+        self.bestrq = MusicFMModel(MusicFMConfig())
         self.rsq48tobestrq = torchaudio.transforms.Resample(48000, 24000)
 
         self.rvq_bestrq_emb = ResidualVectorQuantize(input_dim = 1024, n_codebooks = 1, codebook_size = 16_384, codebook_dim = 32, quantizer_dropout = 0.0, stale_tolerance=200)
         for v in self.rvq_bestrq_emb.parameters():v.requires_grad = False
-        self.rvq_bestrq_emb = torch.compile(self.rvq_bestrq_emb, mode="reduce-overhead")
 
         print("1rvq Audio Tokenizer initialized from pretrain.")
         torch.cuda.empty_cache()

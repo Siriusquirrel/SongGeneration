@@ -551,11 +551,8 @@ class LmModel(nn.Module):
             logits /= (1.1 ** self.penalty_histogram)
 
         if ignore_tokens is not None and ignore_tokens.numel() > 0:
-            ignore_tokens = ignore_tokens.to(device=logits.device, dtype=torch.long)
-        else:
-            ignore_tokens = None
-        if ignore_tokens is not None:
-            logits.index_fill_(-1, ignore_tokens, float('-inf'))
+            logits[0, 0].index_fill_(-1, ignore_tokens, float('-inf'))
+#            logits.index_fill_(-1, ignore_tokens, float('-inf'))
 
         if use_sampling and temp > 0.0:
             logits.div_(temp)
