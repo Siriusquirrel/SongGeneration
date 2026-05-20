@@ -44,46 +44,36 @@ class Tango:
         # 1. Preprocessing & Layout-Fix
         v_proc = self.preprocess_audio(orig_vocal.to(self.device)).squeeze(0)
         b_proc = self.preprocess_audio(orig_bgm.to(self.device)).squeeze(0)
-        
         # Die tatsächliche Länge der Eingabe-Samples bestimmen
         actual_samples = min(v_proc.shape[-1], b_proc.shape[-1])
         # Die exakt benötigte Tokenlänge (z.B. 251 für 10s, 1501 für 60s)
         output_len = int(actual_samples / self.sample_rate * 25) + 1
-        
         min_samples = int(40 * self.sample_rate)
-
         # 2. Internes Padding für die 40s-Modell-Fenster
         num_chunks = max(1, (actual_samples + min_samples - 1) // min_samples)
         total_target = num_chunks * min_samples
-        
         # Nur für die Inferenz loopen (damit das Modell "Futter" hat)
         repeats = (total_target + actual_samples - 1) // actual_samples
         vocal = torch.tile(v_proc[:, :actual_samples], (1, repeats))[:, :total_target]
         bgm = torch.tile(b_proc[:, :actual_samples], (1, repeats))[:, :total_target]
-
         # 3. Batching & Inferenz
         v_input = vocal.reshape(num_chunks, 2, min_samples)
         b_input = bgm.reshape(num_chunks, 2, min_samples)
-
         v_list, b_list = [], []
         for i in range(0, num_chunks, batch_size):
             cv, cb = self.model.fetch_codes_batch(
                 v_input[i : i + batch_size],
                 b_input[i : i + batch_size],
-                additional_feats=[],
                 layer_vocal=self.layer_vocal,
                 layer_bgm=self.layer_bgm
             )
             v_list.append(cv)
             b_list.append(cb)
-
         # 4. Rekonstruktion MIT PRÄZISEM SLICING
         # Das entfernt den Looping-Überhang und liefert exakt output_len zurück
         res_v = torch.cat(v_list, dim=0).permute(1, 0, 2).reshape(1, -1)[:, :output_len].unsqueeze(0)
         res_b = torch.cat(b_list, dim=0).permute(1, 0, 2).reshape(1, -1)[:, :output_len].unsqueeze(0)
-
         return res_v, res_b
-    
 
     @torch.inference_mode()
     def code2sound(self, codes, prompt_vocal=None, prompt_bgm=None, duration=40, guidance_scale=1.5, num_steps=20, disable_progress=False, chunked=True, chunk_size=128):

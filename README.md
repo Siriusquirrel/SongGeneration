@@ -1,18 +1,19 @@
-# SongGeneration - 16GB VRAM Optimized Fork
+# SongGeneration - 16GB VRAM Optimised Fork
 
-This is a performance-optimized fork of the original [SongGeneration](https://github.com/tencent-ailab/SongGeneration) project. It is specifically redesigned to run the **v2 Large model** on consumer-grade GPUs with **16GB of VRAM**.
+This is a performance-optimised fork of the original [SongGeneration](https://github.com/tencent-ailab/SongGeneration) project. It is specifically redesigned to run the **v2 Large model** on consumer-grade GPUs with **16GB of VRAM**.
 
-## Key Optimizations
+## Key Optimisations
 
-*   **v2 Large on 16GB VRAM**: Achieved through **8-bit µ-law quantization for KV-caching** and **FP16 model conversion** (reducing the model footprint from 13GB to **9.5GB**). Combined with **fused QKV/MLP layers**, these optimizations significantly lower the VRAM entry barrier without sacrificing output quality.
-*   **Long-form Generation**: Support for song lengths up to **280 seconds**.
-*   **Triple-Phase Memory Management**: The workflow is split into three independent stages to ensure only one model occupies the VRAM at a time.
-*   **Precision Balance**: Latent generation is optimized for memory, while the final stage runs in full FP32 for high-quality audio reconstruction.
-*   **Code Cleanup**: Redundant dependencies and unused legacy code have been removed to create a streamlined experience.
+*   **v2 Large on 16GB VRAM**: Achieved through **8-bit µ-law quantisation for KV-caching**, **FP16 model conversion** (reducing the model footprint from 13GB to 9.5GB) and **splitting the checkpoint** into main- (**7.2GB**) and sub-transformer (**2.3GB**). These optimisations significantly lower the VRAM entry barrier without sacrificing output quality.
+*   **Speedup of the whole pipeline**: Through **fused QKV/MLP layers** and streamlining.
+*   **Long-form Generation**: Support for song lengths up to **350 seconds** (5 minutes and 50 seconds).
+*   **Quadruple-Phase Memory Management**: The workflow is split into four independent stages to ensure only one model occupies the VRAM at a time.
+*   **Precision Balance**: Tokens generation is optimised for memory, while the flow matching generator and VAE in the final stage run in full FP32 for high-quality audio reconstruction.
+*   **Code Cleanup**: Redundant dependencies and unused legacy code have been removed.
 
 ## System Requirements
 
-The following setup was used for development and verification. While optimized for AMD hardware, it is architecturally compatible with NVIDIA systems.
+The following setup was used for development and verification. While optimised for AMD hardware, it is architecturally compatible with NVIDIA systems.
 
 *   **GPU**: Minimum 16GB VRAM (Verified on AMD RX 9070).
 *   **System RAM**: 32GB System RAM (At least 26GB must be allocated to WSL2).
@@ -21,7 +22,7 @@ The following setup was used for development and verification. While optimized f
 
 ### Installation
 
-1.  **Base Environment**: Install **PyTorch** with the appropriate backend for your hardware (CUDA or ROCm).
+1.  **Base Environment**: Install **PyTorch**, **Triton** and **torchaudio** with the appropriate backend for your hardware (CUDA or ROCm).
 2.  **Dependencies**: 
     ```bash
     pip install -r requirements.txt
@@ -34,31 +35,35 @@ Checkpoints are not included and have to be downloaded from HuggingFace. Please 
 Run the conversion scripts to prepare the models for the 16GB workflow:  
     *   `python ckpt/songgeneration/convert_fp16.py`  
     *   `python ckpt/songgeneration/convert_ckpt_data_structure.py`  
+    *   `python ckpt/songgeneration/split_ckpt.py`  
     *   `python ckpt/model_septoken/convert_fp32.py`  
     *   `python ckpt/model_1rvq/convert_fp32.py`
 
-## Workflow (Three-Phase Process)
+## Workflow (Four-Phase Process)
 
-To minimize VRAM usage, execute the generation in the following sequence:
+To minimise VRAM usage, execute the generation in the following sequence:
 
-1.  **Phase 1: Conditioning** (`jsonl2conditions.sh --input sample/your.jsonl`) – Audio source separation via Demucs if audio prompt is provided.
-2.  **Phase 2: Token Generation** (`conditions2tokens.sh`) – v2 Large inference using µ-law cache.
-3.  **Phase 3: Audio Synthesis** (`tokens2audio.sh`) – Final rendering using model septoken and VAE.
+1.  **Phase 1: Conditioning** (`jsonl2conditions.sh --jsonl sample/jsonl_name.jsonl`) – Audio source separation via Demucs if audio prompt is provided.
+2.  **Phase 2: Token Generation CB0** (`conditions2cb0tokens.sh --batch jsonl_name`) – v2 Large inference of the main-transformer writing result into .pt.zst file.
+3.  **Phase 3: Token Generation CB12** (`cb0tokens2tokens.sh --batch jsonl_name`) - v2 Large inference of the sub-transformer writing result into .pt file.
+4.  **Phase 4: Audio Synthesis** (`tokens2audio.sh --batch jsonl_name`) – Final audio rendering using model septoken and VAE.
+
+For convenience you can combine these steps by executing `jsonl2audio.sh --jsonl sample/your.jsonl`
 
 ## Configuration & Input
 
-### Customizing `config.yaml`
+### Customising `config.yaml`
 #### lyric_processor
-- **max_dur** is the maximum song length in seconds. Default is `280`.
+- **max_dur** is the maximum song length in seconds. Default is `350`.
 #### lm
-- **max_position_embeddings** is the maximum kv_cache length for the main transformer. `8210` tokens are needed for a song about 280 seconds long
-- **max_position_embeddings_sub** is the maximum kv_cache for the sub transfomer. I use the same value here as I used for main.
-- **use_flash_attn_2** `false` activates PyTorch sdpa which on my system is a lot faster than the flash_attn package. If you enable flash attention you automatically use the fp16 kv cache.
-- **use_q8_kv_cache** `true` uses the int8 µ-law cache while `false` uses standard fp16 kv-caching.
+- **max_position_embeddings** is the maximum kv-cache length for the main-transformer. `10000` tokens are needed for a song about 350 seconds long.
+- **max_position_embeddings_sub** is the maximum kv-cache length for the sub-transformer. I use the same value here as for main.
+- **use_flash_attn_2** `false` activates PyTorch sdpa which on my system is a lot faster than the flash_attn package. If you enable flash attention you automatically use the fp16 kv-cache.
+- **use_q8_kv_cache** `true` uses the int8 µ-law kv-cache while `false` uses standard fp16 kv-caching.
 - **q8_kv_cache_mu** You can experiment with different µ-law values here. `64.0` is the default.
 
 ### Input Format (`.jsonl`)
-`jsonl2conditions.sh --input_jsonl` expects a JSONL file where each line represents a separate song:  
+`jsonl2conditions.sh --jsonl` expects a JSONL file where each line represents a separate song:  
 `{"idx": "unique_songname", "gt_lyric": "[intro-short] ; [verse] lyrics ; [outro-short]"}`  
   See `./conf/vocab.yaml` for structure tags within `gt_lyric`.  
 

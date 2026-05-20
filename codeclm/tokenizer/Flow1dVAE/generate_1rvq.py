@@ -62,7 +62,7 @@ class Tango:
 
         for audio_inx in range(0, audio_input.shape[0], batch_size):
             # import pdb; pdb.set_trace()
-            codes = self.model.fetch_codes_batch((audio_input[audio_inx:audio_inx+batch_size]), additional_feats=[],layer=self.layer_num)
+            codes = self.model.fetch_codes_batch((audio_input[audio_inx:audio_inx+batch_size]), layer=self.layer_num)
             codes_list.append(torch.cat(codes, 1))
             # print("codes_list",codes_list[0].shape)
 

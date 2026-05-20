@@ -32,11 +32,10 @@ def check_language_by_text(text):
         return "en"
 
 def generate(args):
-    input_jsonl = args.input_jsonl
-    save_dir = args.save_dir
+    jsonl = Path(args.jsonl)
     cfg = OmegaConf.load('ckpt/songgeneration/config.yaml')
     max_duration = cfg.lyric_processor.max_dur
-    gen_type = args.generate_type
+    type = args.type
     auto_prompt = torch.load('tools/new_auto_prompt.pt')
     demucs_model = get_model_from_yaml('ckpt/htdemucs/htdemucs.yaml', 'ckpt/htdemucs/htdemucs.pth').eval().cuda()
     _, _, ckpt_name = cfg.audio_tokenizer_checkpoint.partition('_')
@@ -44,7 +43,7 @@ def generate(args):
     _, _, ckpt_name_sep = cfg.audio_tokenizer_checkpoint_sep.partition('_')
     seperate_tokenizer = Flow1dVAESeparate(path=ckpt_name_sep, cfg=cfg).eval().cuda()
 
-    with open(input_jsonl, "r") as fp:
+    with open(jsonl, "r") as fp:
         lines = fp.readlines()
 
     new_items = []
@@ -56,16 +55,14 @@ def generate(args):
         item.pop('description', None)
         if desc_text is not None:
             desc_text = desc_text.lower()
-#            if gen_type == 'bgm':
+#            if type == 'bgm':
 #                desc_text = '[Musicality-very-high]' + ', ' + '[Pure-Music]' + ', ' + desc_text
 #            else:
 #                desc_text = '[Musicality-very-high]' + ', ' + desc_text
             item['descriptions'] = desc_text
-        target_wav_name = f"{save_dir}/{item['idx']}.wav"
-        item["wavout_path"] = target_wav_name
         item["raw_wavs"] = False
         if "prompt_audio_path" in item:
-            audiofile = Path(input_jsonl).parent / item['prompt_audio_path']
+            audiofile = jsonl.parent / item['prompt_audio_path']
             assert audiofile.exists(), f"prompt_audio_path {audiofile} not found"
             assert 'auto_prompt_audio_type' not in item, f"auto_prompt_audio_type and prompt_audio_path cannot be used together"
             assert audiofile.suffix.lower() == '.wav', f"Only wav files supported as audio prompts"
@@ -149,18 +146,21 @@ def generate(args):
         new_items.append(item)
 
     # --- ABSPEICHERN DER GESAMTEN LISTE ---
-    conditions_file = Path(save_dir) / "batch_conditions.pt"
+    save_dir = Path("./out")
+    save_dir.mkdir(exist_ok=True)
+    conditions_file = save_dir / f"{jsonl.stem}.cond.pt"
     torch.save(new_items, conditions_file)
+    batch_dir = save_dir / jsonl.stem
+    batch_dir.mkdir(exist_ok=True)
+
     print(f"{len(new_items)} song conditions written to {conditions_file}")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Conditions Generation Script')
 
-    parser.add_argument('--input_jsonl', type=str, required=True,
-                      help='Path to input JSONL file containing generation tasks')
-    parser.add_argument('--save_dir', type=str, default="./out/",
-                      help='Directory to save generated condition files (default: "./out/")')
-    parser.add_argument('--generate_type', type=str, default='mixed',
+    parser.add_argument('--jsonl', type=str, required=True,
+                      help='Path to JSONL file containing songs to generate')
+    parser.add_argument('--type', type=str, default='mixed',
                       help='Type of generation: "vocal" or "bgm" or "separate" or "mixed" (default: "mixed")')
     return parser.parse_args()
 

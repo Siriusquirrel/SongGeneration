@@ -210,11 +210,12 @@ class LlamaAttentionSdpa(LlamaAttentionBase):
         past_key_value.update(k, v, current_pos)
         k_cache, v_cache = past_key_value.fetch(kv_seq_len, bsz)
 
+        causal_flag = True if q_len > 1 else False
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             q.transpose(1, 2),
             k_cache.transpose(1, 2),
             v_cache.transpose(1, 2),
-            is_causal=(q_len > 1)
+            is_causal=causal_flag
         )
         attn_output = attn_output.transpose(1, 2).reshape(bsz, q_len, self.hidden_size)
         return self.o_proj(attn_output)

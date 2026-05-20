@@ -126,7 +126,7 @@ class PromptCondAudioDiffusion(nn.Module):
         self.dtype = dtype
 
     @torch.no_grad()
-    def fetch_codes_batch(self, input_audios_vocal, input_audios_bgm, additional_feats,layer_vocal=7,layer_bgm=7):
+    def fetch_codes_batch(self, input_audios_vocal, input_audios_bgm, layer_vocal=7,layer_bgm=7):
         input_audio_vocal_0 = input_audios_vocal[:,0,:]
         input_audio_vocal_1 = input_audios_vocal[:,1,:]
         input_audio_vocal_0 = self.preprocess_audio(input_audio_vocal_0)

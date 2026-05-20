@@ -1,6 +1,6 @@
 # ================ Train Config ================ #
 lyric_processor:
-  max_dur: 280
+  max_dur: 350
   min_dur: 30
   prompt_len: 10
   pad_to_max: true
@@ -30,8 +30,8 @@ lm:
   num_layers_sub: 12
   code_depth: 3
   code_size: 16384
-  max_position_embeddings: 8210       # was 10000
-  max_position_embeddings_sub: 8210   # was 10000
+  max_position_embeddings: 10000
+  max_position_embeddings_sub: 10000
   rope_theta: 500000.0
   rope_theta_sub: 500000.0
   dropout: 0.0
@@ -86,7 +86,6 @@ attribute_dropout:
 
 use_text_training: True
 fuser:
-  sum: []
   prepend: [ description, prompt_audio, type_info ] # this order is the SAME with the input concatenation order
 
 conditioners:

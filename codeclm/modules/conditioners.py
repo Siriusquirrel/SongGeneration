@@ -462,7 +462,7 @@ class ConditionFuser(nn.Module):
                 "sum": ["genre", "bpm"],
             }
     """
-    FUSING_METHODS = ["sum", "prepend"] #, "cross", "input_interpolate"] (not support in this simplest version)
+    FUSING_METHODS = ["prepend"] # "sum", "cross", "input_interpolate"] (not support in this simplest version)
 
     def __init__(self, fuse2cond: dict[str, list[str]]):
         super().__init__()
@@ -479,7 +479,6 @@ class ConditionFuser(nn.Module):
         input1: torch.Tensor,
         input2: torch.Tensor,
         conditions: dict[str, ConditionType],
-        first_step: bool
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Fuse the conditions to the provided model input.
 
@@ -504,17 +503,8 @@ class ConditionFuser(nn.Module):
         fused_input_2 = input2
         for fuse_op in self.fuse2cond.keys():
             fuse_op_conditions = self.fuse2cond[fuse_op]
-            if fuse_op == 'sum' and len(fuse_op_conditions) > 0:
-                for cond in fuse_op_conditions:
-                    this_cond_1, this_cond_2, cond_mask = conditions[cond]
-                    fused_input_1 += this_cond_1
-                    fused_input_2 += this_cond_2
-            elif fuse_op == 'prepend' and len(fuse_op_conditions) > 0:
-                if not first_step:
-                    continue
-                reverse_list = deepcopy(fuse_op_conditions)
-                reverse_list.reverse()
-                for cond in reverse_list:
+            if fuse_op == 'prepend' and len(fuse_op_conditions) > 0:
+                for cond in reversed(fuse_op_conditions):
                     this_cond_1, this_cond_2, cond_mask = conditions[cond]
                     fused_input_1 = torch.cat((this_cond_1, fused_input_1), dim=1)  # concat along T dim
                     fused_input_2 = torch.cat((this_cond_2, fused_input_2), dim=1)  # concat along T dim
