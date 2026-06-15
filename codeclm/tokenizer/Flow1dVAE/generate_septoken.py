@@ -27,7 +27,7 @@ class Tango:
         self.layer_vocal=layer_vocal
         self.layer_bgm=layer_bgm
         self.MAX_DURATION = cfg.lyric_processor.max_dur
-        self.eos_id = cfg.lm.code_size - 1
+        self.eos_id = cfg.lm.code_size
         self.model = PromptCondAudioDiffusion()
         if model_path.endswith(".safetensors"):
             main_weights = load_file(model_path)
