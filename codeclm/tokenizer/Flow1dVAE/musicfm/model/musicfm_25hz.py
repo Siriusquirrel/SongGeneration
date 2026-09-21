@@ -182,8 +182,39 @@ class MusicFM25Hz(nn.Module):
     def encoder(self, x):
         """2-layer conv + w2v-conformer"""
         x = self.conv(x) # [3, 128, 3000] -> [3, 750, 1024]
-        out = self.conformer(x, output_hidden_states=True)
-        hidden_emb = out["hidden_states"]
+        # Collect per-layer hidden states via forward hooks. This reproduces the old
+        # transformers API (`output_hidden_states=True` on Wav2Vec2ConformerEncoder),
+        # which was removed in transformers >=5.16 (the encoder then only returns
+        # `last_hidden_state`). Hooks are a stable torch API, so this works on both
+        # old (layer output = (hidden_states, attentions)) and new (bare tensor) versions.
+        # Tuple semantics (as in the old transformers API): T[0] = encoder input (after
+        # dropout), T[1..n-1] = outputs of layers 0..n-2, T[n] = final layer_norm output
+        # (= last_hidden_state), n = num_hidden_layers. Note: the raw output of the last
+        # layer is NOT part of the tuple - it is replaced by its layer_norm version.
+        hidden_list = []
+        def _pre0(m, inp):
+            hidden_list.append(inp[0])
+        def _post(m, inp, out):
+            if isinstance(out, tuple):
+                out = out[0]
+            hidden_list.append(out)
+        h_pre = self.conformer.layers[0].register_forward_pre_hook(_pre0)
+        h_posts = [l.register_forward_hook(_post) for l in self.conformer.layers[:-1]]
+        try:
+            out = self.conformer(x)
+        finally:
+            h_pre.remove()
+            for h in h_posts:
+                h.remove()
+        hidden_list.append(out["last_hidden_state"])
+        expected = len(self.conformer.layers) + 1
+        if len(hidden_list) != expected:
+            raise RuntimeError(
+                f"hidden states collection mismatch: expected {expected}, got {len(hidden_list)} "
+                "(a conformer layer was skipped, e.g. layerdrop > 0, or the transformers "
+                "layer output API changed)"
+            )
+        hidden_emb = tuple(hidden_list)
         last_emb = out["last_hidden_state"]
         logits = self.linear(last_emb)
         logits = {

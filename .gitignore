@@ -1,7 +1,11 @@
+ckpt_merged/
+.ckpt_work/
 launchs/
 out/
 **/__pycache__
 sample/generated/
+sample/wav/sample_prompt_audio_vocal.wav
+sample/wav/sample_prompt_audio_bgm.wav
 *.pth
 *.bin
 *.ckpt
